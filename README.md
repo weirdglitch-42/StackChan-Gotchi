@@ -76,10 +76,6 @@ idf.py build
 idf.py -p COM8 flash monitor
 ```
 
-Or use the provided batch scripts:
-- `clean_build.bat` - Clean build
-- `flash.bat` - Flash to device
-
 ---
 
 ## Project Structure

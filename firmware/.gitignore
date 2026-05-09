@@ -65,3 +65,6 @@ sdkconfig
 sdkconfig.old
 
 xiaozhi-esp32/
+
+# Build output logs
+build_output.txt

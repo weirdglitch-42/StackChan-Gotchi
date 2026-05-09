@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2026 M5Stack Technology CO LTD
+ * SPDX-FileCopyrightText: 2026 StackChan-Gotchi
  *
  * SPDX-License-Identifier: MIT
  */
@@ -12,3 +12,4 @@
 #include "app_app_center/app_app_center.h"
 #include "app_ezdata/app_ezdata.h"
 #include "app_dance/app_dance.h"
+#include "app_gotchi/app_gotchi.h"

@@ -14,9 +14,15 @@ file(GLOB_RECURSE STACK_CHAN_SOURCES
     "stackchan/*.c"
     "stackchan/*.cc"
     "stackchan/*.cpp"
+    "gotchi/*.c"
+    "gotchi/*.cc"
+    "gotchi/*.cpp"
 )
 set(STACK_CHAN_INCLUDE_DIRS 
     "."
+    "gotchi"
+    "${CMAKE_CURRENT_SOURCE_DIR}/gotchi"
+    "${CMAKE_CURRENT_SOURCE_DIR}/apps/app_gotchi"
 )
 list(APPEND STACK_CHAN_SOURCES main.cpp)
 

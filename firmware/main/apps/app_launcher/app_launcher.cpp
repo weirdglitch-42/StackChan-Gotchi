@@ -26,12 +26,10 @@ void AppLauncher::onLauncherOpen()
 
     LvglLockGuard lock;
 
-    if (!_startup_checked && !GetHAL().isAppConfiged()) {
-        mclog::tagInfo(getAppInfo().name, "app not configured, start startup worker");
-        _startup_worker = std::make_unique<setup_workers::StartupWorker>();
-    } else {
-        create_launcher_view();
-    }
+    // Skip startup worker - always show launcher with all apps (including Gotchi)
+    // This bypasses the "Welcome!" setup screen
+    _startup_checked = true;
+    create_launcher_view();
 }
 
 void AppLauncher::onLauncherRunning()

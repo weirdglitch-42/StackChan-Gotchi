@@ -197,26 +197,12 @@ public:
 
     bool UpdateTouchPoint()
     {
-        auto err = TryReadRegs(0x02, read_buffer_, 6);
-        if (err != ESP_OK) {
-            tp_.num = 0;
-            tp_.x   = -1;
-            tp_.y   = -1;
+        ReadRegs(0x02, read_buffer_, 6);
 
-            consecutive_failures_++;
-            int64_t now_us = esp_timer_get_time();
-            if (last_error_log_us_ == 0 || (now_us - last_error_log_us_) >= 1000 * 1000) {
-                ESP_LOGW(TAG, "FT6336 read failed (%s), skipped %lu sample(s)", esp_err_to_name(err),
-                         static_cast<unsigned long>(consecutive_failures_));
-                last_error_log_us_ = now_us;
-            }
-            return false;
-        }
-
-        consecutive_failures_ = 0;
-        tp_.num               = read_buffer_[0] & 0x0F;
-        tp_.x                 = ((read_buffer_[1] & 0x0F) << 8) | read_buffer_[2];
-        tp_.y                 = ((read_buffer_[3] & 0x0F) << 8) | read_buffer_[4];
+        tp_.num = read_buffer_[0] & 0x0F;
+        tp_.x   = ((read_buffer_[1] & 0x0F) << 8) | read_buffer_[2];
+        tp_.y   = ((read_buffer_[3] & 0x0F) << 8) | read_buffer_[4];
+        
         return true;
     }
 
@@ -398,7 +384,7 @@ private:
     {
         spi_bus_config_t buscfg = {};
         buscfg.mosi_io_num      = GPIO_NUM_37;
-        buscfg.miso_io_num      = GPIO_NUM_NC;
+        buscfg.miso_io_num      = GPIO_NUM_35;
         buscfg.sclk_io_num      = GPIO_NUM_36;
         buscfg.quadwp_io_num    = GPIO_NUM_NC;
         buscfg.quadhd_io_num    = GPIO_NUM_NC;
@@ -643,6 +629,14 @@ uint8_t hal_bridge::board_get_speaker_volume()
         volume = 10;
     }
     return volume;
+}
+
+void hal_bridge::app_play_tone(int frequency, int duration_ms)
+{
+    // Tone generation - stub for now
+    // Will be implemented with LEDC tone system
+    (void)frequency;
+    (void)duration_ms;
 }
 
 void hal_bridge::toggle_xiaozhi_chat_state()

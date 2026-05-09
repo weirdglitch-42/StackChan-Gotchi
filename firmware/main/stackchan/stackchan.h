@@ -90,6 +90,20 @@ public:
         return false;
     }
 
+    /**
+     * @brief Check if motion is attached
+     *
+     * @return true
+     * @return false
+     */
+    bool hasMotion()
+    {
+        if (_motion) {
+            return true;
+        }
+        return false;
+    }
+
     addon::NeonLight& leftNeonLight() override
     {
         return _left_neon_light;

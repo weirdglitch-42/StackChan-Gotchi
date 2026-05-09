@@ -61,5 +61,6 @@ void board_set_speaker_volume(uint8_t volume, bool permanent = false);
 uint8_t board_get_speaker_volume();
 
 void app_play_sound(const std::string_view& sound);
+void app_play_tone(int frequency, int duration_ms);
 
 }  // namespace hal_bridge
