@@ -1,32 +1,110 @@
-# StackChan Open-Source
+# StackChan-Gotchi
 
-<img src="https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/K151_stack_chan_main_pictures_01.webp" width="60%">
+<p align="center">
+  <img src="https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/K151_stack_chan_main_pictures_01.webp" width="60%">
+</p>
 
-Here are StackChan related open-source resources, including source code of the StackChan firmware, remote controller firmware, mobile app (iOS and Android), and server. 
+A **pwnagotchi-style WiFi/BLE reconnaissance companion** for M5Stack CoreS3 robot (StackChan). Combines Tamagotchi-like gamification with network scanning, uniquely leveraging StackChan's robot capabilities—expressive face, head movement, and neon lights.
 
-Update of this repo could be a little late than the released firmware and mobile app. 
+---
 
-----
+## Overview
 
-<img src="https://cdn.shopify.com/s/files/1/0056/7689/2250/files/5a589623895f65487717894d9240f6b8.png" width="60%">
+**Goal**: Create an engaging WiFi/BLE reconnaissance tool that leverages StackChan's robot capabilities to make network security research more interactive and fun.
 
-**StackChan is a super kawaii AI desktop robot co-created by M5Stack and the user community.** It uses the M5Stack **flagship IoT development kit [CoreS3](https://docs.m5stack.com/en/core/CoreS3)** as its main controller, powered by an ESP32-S3 SoC featuring a 240 MHz dual-core processor, with 16MB Flash and 8MB PSRAM onboard, and supporting Wi-Fi and BLE. The main unit also integrates a 2.0-inch capacitive touch display with a high-strength glass cover, a 0.3 MP camera, a proximity & ambient light sensor, a 9-axis IMU (accelerometer + gyroscope + magnetometer), a microSD card slot, a 1W speaker, dual microphones, and power/reset buttons. 
+**Hardware**: M5Stack CoreS3 (ESP32-S3, 16MB Flash, 8MB PSRAM) + GPS Unit (optional)
 
-The **robot body**, connected to the main unit, includes a USB-C interface for power and data, a 550 mAh battery, two feedback servos (360-degree continuous rotation on the horizontal axis and 90-degree movement on the vertical axis), two rows totaling 12 RGB LEDs, infrared transmitter and receiver, a three-zone touch panel, and a full-featured NFC module. 
+**Inspiration**:
+- [M5PORKCHOP](https://github.com/M-Tech-Innovation/M5PORKCHOP) - Gamification, XP system, multiple modes, personality
+- [M5Gotchi](https://github.com/xenon-mastodon/M5Gotchi) - Pwnagotchi UI, auto mode, web interface
 
-The **factory firmware** is feature-rich, including an AI Agent, lively and expressive animations, ESP-NOW wireless remote control, and online app downloads. It can connect to a mobile app for video viewing, remote avatar control, and more, and also supports online updates (OTA). The product also supports programming via Arduino, UiFlow2, and other methods, and can connect to various expansion units in the M5Stack ecosystem, making it easy to implement a wide range of custom functions. 
+---
 
-> ⚠️ Do not forcibly rotate any movable parts connected to the motors by hand when you are unsure whether the motors are powered and under control, as this may cause hardware damage. 
+## Features
 
-- Purchase link: [M5Stack Official Store](https://shop.m5stack.com/products/stackchan-kawaii-co-created-open-source-ai-desktop-robot) | [淘宝 Taobao](https://item.taobao.com/item.htm?id=1042238294510)
+### Network Scanning
+- WiFi beacon frame capture (promiscuous mode)
+- Channel hopping (1-13, prioritizes 1/6/11)
+- EAPOL handshake capture
+- BLE device scanning via NimBLE
 
-- Product document page: [English](https://docs.m5stack.com/en/StackChan) | [日本語](https://docs.m5stack.com/ja/StackChan) | [中文](https://docs.m5stack.com/zh_CN/StackChan)
+### Gamification System
+- XP earned from: networks discovered, handshakes captured, channels scanned, uptime
+- 8 robot-themed levels (Unit → Omega)
+- Persistent XP storage via ESP32 NVS
 
-- Board support package: https://github.com/m5stack/StackChan-BSP
+### Modes
+| Mode | Description | Neon Color |
+|------|-------------|------------|
+| **SNIFF** | Active WiFi monitoring, capture handshakes | Green/Cyan |
+| **SCOUT** | Passive scanning, no transmission | Blue |
+| **WARDIVE** | Active wardriving with GPS logging | Orange |
+| **SPECTRUM** | Channel analysis | Rainbow |
+| **BLE-SNIFF** | BLE device scanning | Blue/Purple |
+| **IDLE** | Idle mode | Green |
 
-Thank you to the contributors of the StackChan community, especially: 
+### StackChan Integration
+- Dynamic avatar emotions per mode
+- Head movement speed increases with activity
+- Neon light indicators color-coded by mode
+- Touch interaction for mode cycling
 
-| ![](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/avatar_stack_chan.jpg) | ![](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/avatar_takao.jpg) |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| [@stack_chan](https://x.com/stack_chan)                                          | [@mongonta555](https://x.com/mongonta555)                                   |
-| Shinya Ishikawa                                                                  | Takao Akaki                                                                 |
+### Additional
+- GPS support (GPS-BDS Unit on UART2)
+- Internal flash storage (~2MB FATFS)
+- On-screen stats display
+
+---
+
+## Hardware
+
+### Requirements
+- M5Stack CoreS3
+- (Optional) GPS-BDS Unit v1.1 for wardriving
+
+### Known Limitations
+- SD card unavailable (firmware bug affecting StackChan)
+- Internal flash storage (~2MB) used instead
+
+---
+
+## Build & Flash
+
+```bash
+cd firmware
+idf.py build
+idf.py -p COM8 flash monitor
+```
+
+Or use the provided batch scripts:
+- `clean_build.bat` - Clean build
+- `flash.bat` - Flash to device
+
+---
+
+## Project Structure
+
+```
+firmware/main/
+├── apps/app_gotchi/     - Main UI and mode handling
+├── gotchi/              - Core scanning logic, XP system, GPS, storage
+└── hal/board/           - StackChan board initialization
+```
+
+---
+
+## Legal Warning
+
+This tool is for **educational and security research purposes only**.
+
+- Only test networks you own or have explicit permission to test
+- Unauthorized access to computer systems is illegal
+- The author takes no responsibility for misuse
+
+---
+
+## References
+
+- StackChan: https://github.com/M5Stack/M5Stack-StackChan
+- M5PORKCHOP: https://github.com/M-Tech-Innovation/M5PORKCHOP
+- M5Gotchi: https://github.com/xenon-mastodon/M5Gotchi
