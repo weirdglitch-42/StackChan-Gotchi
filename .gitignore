@@ -1,2 +1,29 @@
 .DS_Store
 .idea/
+.vscode/
+
+# Build outputs
+*.log
+build_output.txt
+
+# OS files
+Thumbs.db
+*.swp
+*~
+
+# Firmware build
+firmware/build/
+firmware/cmake-build-*/
+firmware/managed_components/
+firmware/sdkconfig
+firmware/sdkconfig.old
+
+# Go build
+server/*.exe
+server/stackchan-server
+server/tmp/
+
+# Node/Flutter (if applicable)
+node_modules/
+.pubspec.lock
+.dart_tool/

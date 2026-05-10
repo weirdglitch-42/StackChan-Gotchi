@@ -70,11 +70,30 @@ A **pwnagotchi-style WiFi/BLE reconnaissance companion** for M5Stack CoreS3 robo
 
 ## Build & Flash
 
-```bash
+### Quick Start (Windows CMD)
+```batch
+cd firmware
+menu.bat
+```
+Then select option 1 for clean build, or 3 to flash.
+
+### Manual Build
+```batch
 cd firmware
 idf.py build
 idf.py -p COM8 flash monitor
 ```
+
+### Available Scripts
+| Script | Description |
+|--------|-------------|
+| `menu.bat` | Interactive build menu (recommended) |
+| `clean_build.bat` | Clean + build (removes build folder first) |
+| `build.bat` | Quick incremental build |
+| `flash.bat` | Flash to device (prompts for COM port) |
+| `erase_flash.bat` | Erase NVS or full flash |
+
+**Note**: Run scripts in CMD (not PowerShell or Git Bash).
 
 ---
 
