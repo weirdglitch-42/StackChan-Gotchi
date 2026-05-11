@@ -63,6 +63,11 @@ inline int16_t getModeHeadPitch(Mode mode) { return getModeInfo(mode).headPitch;
 inline bool isDialogueEnabled(Mode mode) { return getModeInfo(mode).enableDialogue; }
 inline uint32_t getModeDialogueInterval(Mode mode) { return getModeInfo(mode).dialogueIntervalMs; }
 inline int getModeDialogueCategory(Mode mode) { return getModeInfo(mode).dialogueCategory; }
+inline bool canAccessMode(Mode mode) {
+    if (mode == Mode::HUNT) return gotchi::isHuntEnabled();
+    if (mode == Mode::ROGUE) return gotchi::isRogueEnabled();
+    return true;
+}
 
 inline int16_t getModeHeadYaw(Mode mode, uint32_t now, uint32_t interval) {
     const ModeInfo& mi = getModeInfo(mode);

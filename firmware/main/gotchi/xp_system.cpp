@@ -131,4 +131,10 @@ void XPSystem::saveToNVS() {
     nvs_close(nvs);
 }
 
+static XPSystem _xpSystem;
+
+XPSystem& getXPSystem() {
+    return _xpSystem;
+}
+
 }

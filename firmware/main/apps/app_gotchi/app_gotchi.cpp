@@ -6,6 +6,7 @@
 #include <esp_log.h>
 #include <cstring>
 #include <cmath>
+#include <algorithm>
 #include <hal/hal.h>
 #include <hal/board/hal_bridge.h>
 #include <mooncake.h>
@@ -17,6 +18,7 @@
 #include <gotchi/gotchi.h>
 #include <gotchi/storage.h>
 #include <gotchi/mode.h>
+#include <gotchi/rogue_manager.h>
 
 using namespace mooncake;
 using namespace stackchan;
@@ -60,7 +62,7 @@ void AppGotchi::onOpen() {
     _statsLabel->setTextColor(lv_color_hex(0x00FF88));
     _statsLabel->setTextAlign(LV_TEXT_ALIGN_LEFT);
     _statsLabel->setSize(300, 75);  // Taller for 3-line display
-    _statsLabel->align(LV_ALIGN_TOP_LEFT, 5, 5);
+    _statsLabel->align(LV_ALIGN_TOP_LEFT, 5, 10);
     _statsLabel->setText("Nets:0 XP:0 Lvl:1 | Scanning...");
 
     // Network list display (bottom of screen)
@@ -266,7 +268,13 @@ void AppGotchi::handleInput() {
 }
 
 void AppGotchi::cycleMode() {
-    _currentMode = gotchi::getModeInfo(_currentMode).nextMode;
+    gotchi::Mode next = gotchi::getModeInfo(_currentMode).nextMode;
+    
+    // Skip disabled modes
+    for (int i = 0; i < 10 && !gotchi::canAccessMode(next); i++) {
+        next = gotchi::getModeInfo(next).nextMode;
+    }
+    _currentMode = next;
     
     gotchi::setMode(_currentMode);
     gotchi::onModeEnter(_currentMode);
@@ -556,42 +564,211 @@ void AppGotchi::renderUI() {
                      stats.currentChannel, (int)stats.level, progress);
         }
     }
-    // ROGUE mode - show educational warning
+    
+    // Cleanup all grid labels when leaving their respective modes
+    if (_spectrumLabelsCreated && _currentMode != gotchi::Mode::SPECTRUM) {
+        destroySpectrumLabels();
+    }
+    if (_networkBarsCreated && _currentMode != gotchi::Mode::SCOUT && _currentMode != gotchi::Mode::HUNT) {
+        destroyNetworkBars();
+    }
+    if (_signalBarsCreated && _currentMode != gotchi::Mode::WARDIVE) {
+        destroySignalBars();
+    }
+    if (_bleLabelsCreated && _currentMode != gotchi::Mode::BLE_SCAN) {
+        destroyBLELabels();
+    }
+    if (_headerBoxesCreated) {
+        destroyHeaderBoxes();
+    }
+    
+    // Create and update header boxes for all modes
+    createHeaderBoxes();
+    updateHeaderBoxes();
+    
+    // Hide old stats label since we're using header boxes now
+    _statsLabel->setSize(0, 0);
+    _statsLabel->setText("");
+    
+    // IDLE mode - rest state with clean UI
+    if (_currentMode == gotchi::Mode::IDLE) {
+        // Header boxes already created/updated above
+        _networkListLabel->setSize(300, 50);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
+        _networkListLabel->setBgColor(lv_color_hex(0x001a00));  // Dark green bg
+        _networkListLabel->setTextColor(lv_color_hex(0x66FF66));  // Green text
+        _networkListLabel->setText("Robot is at rest.");
+        return;
+    }
+    // SCOUT mode - passive scanning (blue theme)
+    else if (_currentMode == gotchi::Mode::SCOUT) {
+        _networkListLabel->setSize(300, 60);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
+        _networkListLabel->setBgColor(lv_color_hex(0x000D22));  // Dark blue bg
+        _networkListLabel->setTextColor(lv_color_hex(0x66AAFF));  // Blue text
+        
+        // Show top 3 networks by signal strength
+        char netList[200] = {0};
+        int count = 0;
+        bool isNew = (networks.size() > _lastNetworkCount);
+        
+        // Sort by signal strength (highest first)
+        std::vector<gotchi::NetworkInfo> sorted = networks;
+        std::sort(sorted.begin(), sorted.end(), [](const gotchi::NetworkInfo& a, const gotchi::NetworkInfo& b) {
+            return a.rssi > b.rssi;
+        });
+        
+        for (const auto& net : sorted) {
+            if (count >= 3) break;
+            char line[64];
+            const char* newStr = (count == 0 && isNew) ? " NEW" : "";
+            snprintf(line, sizeof(line), "%-12s %4ddBm CH%d%s\n", 
+                     net.ssid, (int)net.rssi, net.channel, newStr);
+            strncat(netList, line, sizeof(netList) - strlen(netList) - 1);
+            count++;
+        }
+        if (networks.empty()) {
+            snprintf(netList, sizeof(netList), "Scanning...\n");
+        }
+        _networkListLabel->setText(netList);
+        
+        _lastNetworkCount = networks.size();
+        return;
+    }
+    // HUNT mode - active scanning (green theme with action)
+    else if (_currentMode == gotchi::Mode::HUNT) {
+        _networkListLabel->setSize(300, 60);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
+        _networkListLabel->setBgColor(lv_color_hex(0x001A00));  // Dark green bg
+        _networkListLabel->setTextColor(lv_color_hex(0x66FF66));  // Green text
+        
+        // Show top 3 networks by signal strength
+        char netList[200] = {0};
+        int count = 0;
+        bool isNew = (networks.size() > _lastNetworkCount);
+        
+        std::vector<gotchi::NetworkInfo> sorted = networks;
+        std::sort(sorted.begin(), sorted.end(), [](const gotchi::NetworkInfo& a, const gotchi::NetworkInfo& b) {
+            return a.rssi > b.rssi;
+        });
+        
+        for (const auto& net : sorted) {
+            if (count >= 3) break;
+            char line[64];
+            const char* newStr = (count == 0 && isNew) ? " NEW" : "";
+            snprintf(line, sizeof(line), "%-12s %4ddBm CH%d%s\n", 
+                     net.ssid, (int)net.rssi, net.channel, newStr);
+            strncat(netList, line, sizeof(netList) - strlen(netList) - 1);
+            count++;
+        }
+        if (networks.empty()) {
+            snprintf(netList, sizeof(netList), "Scanning...\n");
+        }
+        _networkListLabel->setText(netList);
+        
+        _lastNetworkCount = networks.size();
+        return;
+    }
+    // WARDIVE mode - GPS wardriving (orange theme)
+    else if (_currentMode == gotchi::Mode::WARDIVE) {
+        _networkListLabel->setSize(300, 110);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
+        _networkListLabel->setBgColor(lv_color_hex(0x221100));  // Dark orange bg
+        _networkListLabel->setTextColor(lv_color_hex(0xFFaa44));  // Orange text
+        
+        createSignalBars();
+        updateSignalBars();
+        _networkListLabel->setText("");
+        return;
+    }
+    // BLE_SCAN mode - formatted device list
+    else if (_currentMode == gotchi::Mode::BLE_SCAN) {
+        _networkListLabel->setSize(300, 90);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
+        _networkListLabel->setBgColor(lv_color_hex(0x001522));
+        _networkListLabel->setTextColor(lv_color_hex(0x44DDDD));
+        
+        auto devices = gotchi::getBLEDevices();
+        char bleList[400] = {0};
+        
+        std::vector<gotchi::BLEDeviceInfo> sorted = devices;
+        std::sort(sorted.begin(), sorted.end(), [](const gotchi::BLEDeviceInfo& a, const gotchi::BLEDeviceInfo& b) {
+            return a.rssi > b.rssi;
+        });
+        
+        strncat(bleList, "Name       MAC          RSSI\n", sizeof(bleList) - 1);
+        strncat(bleList, "------------------------------\n", sizeof(bleList) - 1);
+        
+        int count = 0;
+        for (const auto& dev : sorted) {
+            if (count >= 5) break;
+            char line[50];
+            char macStr[13];
+            snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X%02X%02X", dev.mac[0], dev.mac[1], dev.mac[2], dev.mac[3], dev.mac[4]);
+            snprintf(line, sizeof(line), "%-10s %-11s %d\n", dev.name, macStr, (int)dev.rssi);
+            strncat(bleList, line, sizeof(bleList) - strlen(bleList) - 1);
+            count++;
+        }
+        if (devices.empty()) {
+            strncat(bleList, "Scanning for BLE...\n", sizeof(bleList) - 1);
+        }
+        _networkListLabel->setText(bleList);
+        return;
+    }
+    // SPECTRUM mode - channel analysis (purple theme with heatmap)
+    else if (_currentMode == gotchi::Mode::SPECTRUM) {
+        _networkListLabel->setSize(300, 110);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
+        _networkListLabel->setBgColor(lv_color_hex(0x150022));  // Dark purple bg
+        _networkListLabel->setTextColor(lv_color_hex(0xDD66DD));  // Purple text
+        
+        createSpectrumLabels();
+        updateSpectrumLabels();
+        _networkListLabel->setText("");
+        return;
+    }
+    // ROGUE mode - enhanced display with real data
     else if (_currentMode == gotchi::Mode::ROGUE) {
-        _statsLabel->setBgColor(lv_color_hex(0x332200));  // Dark orange background
-        _statsLabel->setTextColor(lv_color_hex(0xFFCC88));  // Light orange text
+        _networkListLabel->setSize(320, 180);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_MID, 0, -5);
+        _networkListLabel->setBgColor(lv_color_hex(0x1A0A00));  // Dark orange bg
+        _networkListLabel->setTextColor(lv_color_hex(0xFFCC66));  // Orange text
         
-        snprintf(statsText, sizeof(statsText), 
-                 "ROGUE MODE!\n"
-                 "Educational Only!\n"
-                 "Use on OWN networks only!");
-        _statsLabel->setText(statsText);
+        // Get real data from rogue manager
+        auto& rogue = gotchi::getRogueManager();
+        const char* targetSSID = rogue.getTargetSSID();
+        uint8_t targetCh = rogue.getTargetChannel();
+        bool isRunning = rogue.isActive();
         
-        // Show warning in network list area
-        _networkListLabel->setBgColor(lv_color_hex(0x221100));
-        _networkListLabel->setTextColor(lv_color_hex(0xFFAA66));
-        _networkListLabel->setText("Broadcasting fake APs...\n"
-                                   "Creates rogue access points.\n"
-                                   "FOR EDUCATIONAL USE ONLY!\n"
-                                   "Demonstrates rogue AP attacks.");
+        char rogueDisplay[600];
+        const char* statusStr = isRunning ? "Broadcasting" : "Stopped";
+        
+        snprintf(rogueDisplay, sizeof(rogueDisplay),
+            "======================================\n"
+            "   WARNING - EDUCATIONAL USE ONLY\n"
+            "======================================\n"
+            "Target SSID:  %s\n"
+            "Target CH:    %d\n"
+            "Status:       %s\n"
+            "--------------------------------------\n"
+            "Demo of rogue AP / evil twin attacks\n"
+            "   Only test on networks YOU own!\n"
+            "======================================",
+            targetSSID, (int)targetCh, statusStr);
+        
+        _networkListLabel->setText(rogueDisplay);
         
         if (GetStackChan().hasAvatar()) {
-            GetStackChan().avatar().setSpeech("ROGUE!\nFake APs!\nEducational only!");
+            if (isRunning) {
+                GetStackChan().avatar().setSpeech("ROGUE\nBroadcasting!\nBe careful!");
+            } else {
+                GetStackChan().avatar().setSpeech("ROGUE\nNot running.\nSet target first.");
+            }
         }
+        return;
     }
     // CONFIG mode - show config UI
     else if (_currentMode == gotchi::Mode::CONFIG) {
-        _statsLabel->setBgColor(lv_color_hex(0x003333));  // Dark cyan background
-        _statsLabel->setTextColor(lv_color_hex(0x88FFFF));  // Light cyan text
-        
-        snprintf(statsText, sizeof(statsText), 
-                 "CONFIG MODE\n"
-                 "Tap to exit\n"
-                 "WiFi: %s",
-                 gotchi::isConfigMode() ? "Active" : "Inactive");
-        _statsLabel->setText(statsText);
-        
-        // Show config instructions in network list area
         _networkListLabel->setSize(300, 50);
         _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
         _networkListLabel->setBgColor(lv_color_hex(0x002222));
@@ -602,38 +779,60 @@ void AppGotchi::renderUI() {
                                     "Or edit /sd/config.json on SD card\n"
                                     "\n"
                                     "Tap anywhere to exit");
+        return;
     }
-    // STATS mode check BEFORE network check (priority display)
+    // STATS mode - full screen stats display
     else if (_currentMode == gotchi::Mode::STATS) {
-        const char* prestigeStr = stats.prestige > 0 ? "+P" : "";
-        const char* dtStr = gotchi::isDeepThoughtUnlocked() ? "*" : "";
-        
-        // Full stats display - top section shows key stats
-        _statsLabel->setSize(320, 70);
-        _statsLabel->align(LV_ALIGN_TOP_MID, 0, 5);
-        _statsLabel->setBgColor(lv_color_hex(0x330033));  // Purple background
-        _statsLabel->setTextColor(lv_color_hex(0xFF88FF));  // Light purple text
-        
-        // Reset network list label for STATS mode
-        _networkListLabel->setSize(320, 185);
+        // Full screen stats display
+        _networkListLabel->setSize(320, 220);
         _networkListLabel->align(LV_ALIGN_BOTTOM_MID, 0, -5);
-        _networkListLabel->setBgColor(lv_color_hex(0x220033));  // Dark purple
-        _networkListLabel->setTextColor(lv_color_hex(0xFF88FF));
+        _networkListLabel->setBgColor(lv_color_hex(0x1A0A1A));  // Dark purple bg
+        _networkListLabel->setTextColor(lv_color_hex(0xDD88DD));  // Purple text
         
-        snprintf(statsText, sizeof(statsText), 
-                 "Lv:%d%s%s XP:%d\n"           // Line 1: Level, prestige, XP
-                 "Ach:%u/17 Uptime:%02uh%02um", // Line 2: Achievements, uptime
-                 (int)stats.level, prestigeStr, dtStr,
-                 (int)stats.xp,
-                 (unsigned)stats.achievementCount,
-                 (unsigned)(stats.uptimeSeconds / 3600),
-                 (unsigned)((stats.uptimeSeconds % 3600) / 60));
+        // Build full stats display
+        char statsDisplay[500];
+        const char* prestigeStr = stats.prestige > 0 ? "+P" : "";
         
-        // Hide avatar speech in STATS mode
+        int hours = stats.uptimeSeconds / 3600;
+        int mins = (stats.uptimeSeconds % 3600) / 60;
+        int secs = stats.uptimeSeconds % 60;
+        
+        int sessHours = stats.sessionTimeSeconds / 3600;
+        int sessMins = (stats.sessionTimeSeconds % 3600) / 60;
+        
+        snprintf(statsDisplay, sizeof(statsDisplay),
+            "=========== STATS ============\n"
+            "Lv: %d%s  XP: %d  Prog: %d%%\n"
+            "Ach: %u/17 | Nets: %u | HS: %u\n"
+            "------------------------------\n"
+            "Session: %u nets | %dh%dm | +%u XP\n"
+            "Uptime: %dh%dm%ds | Heap: %d\n"
+            "GPS: %s (%d sats)",
+            (int)stats.level, prestigeStr, (int)stats.xp,
+            gotchi::getXPProgress(stats.xp, stats.level),
+            (unsigned)stats.achievementCount,
+            (unsigned)stats.networksFound,
+            (unsigned)stats.handshakesCaptured,
+            (unsigned)stats.sessionNetworks, sessHours, sessMins,
+            (unsigned)stats.sessionXPGain,
+            hours, mins, secs,
+            (int)stats.freeHeap,
+            stats.gpsValid ? "OK" : "No",
+            (int)stats.gpsSatellites);
+        
+        _networkListLabel->setText(statsDisplay);
+        
         if (GetStackChan().hasAvatar()) {
             GetStackChan().avatar().setSpeech("");
         }
-    } else if (networks.size() > 0) {
+        return;
+    }
+    // Fallback for any other modes (shouldn't reach here)
+    // Networks and text fallback - this code should NOT run for any defined mode
+    // since all modes now have explicit handling above with returns
+    
+    // Legacy fallback kept for safety - shows scanning status
+    if (networks.size() > 0) {
         // 3-line format: Line1=Network, Line2=Level/XP, Line3=Other
         int progress = gotchi::getXPProgress(stats.xp, stats.level);
         snprintf(statsText, sizeof(statsText), 
@@ -647,7 +846,7 @@ void AppGotchi::renderUI() {
     } else {
         // Reset label positions and colors for other modes (no networks found)
         _statsLabel->setSize(300, 75);
-        _statsLabel->align(LV_ALIGN_TOP_LEFT, 5, 5);
+        _statsLabel->align(LV_ALIGN_TOP_LEFT, 5, 10);
         _statsLabel->setBgColor(lv_color_hex(0x003320));  // Reset to green
         _statsLabel->setTextColor(lv_color_hex(0x00FF88));  // Reset text color
         _networkListLabel->setSize(300, 50);
@@ -753,6 +952,12 @@ void AppGotchi::renderUI() {
         snprintf(wardiveText, sizeof(wardiveText), "+++ %d Strong | ++ %d Med | + %d Weak\n* %s %s",
                  strong, medium, weak, getSignalBars(bestRssi), bestSsid);
         _networkListLabel->setText(wardiveText);
+    } else if (_currentMode == gotchi::Mode::IDLE) {
+        // IDLE - show rest state message
+        _networkListLabel->setText("Robot is at rest.\n"
+                                    "Touch sides to cycle modes.\n"
+                                    "Up: Next mode\n"
+                                    "Down: Previous mode");
     } else if (_currentMode == gotchi::Mode::SCOUT) {
         // SCOUT - show detailed network list with signal bars
         char scoutText[512] = "";
@@ -876,12 +1081,13 @@ void AppGotchi::renderUI() {
     if (gotchi::isDialogueEnabled(_currentMode)) {
         uint32_t interval = gotchi::getModeDialogueInterval(_currentMode);
         uint32_t now = GetHAL().millis();
-        if (interval > 0 && now - _lastIdleSpeak > interval && _idleDialogue.shouldSpeak(now)) {
+        if (interval > 0 && now - _lastIdleSpeak > interval) {
             _lastIdleSpeak = now;
             if (GetStackChan().hasAvatar()) {
                 const char* phrase = _idleDialogue.getModeSpecificPhrase(_currentMode);
                 GetStackChan().avatar().setSpeech(phrase);
                 GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(2500, 180, true));
+                mclog::tagInfo(getAppInfo().name, "Idle phrase: %s", phrase);
             }
         }
     }
@@ -899,4 +1105,428 @@ void AppGotchi::renderUI() {
         mclog::tagInfo(getAppInfo().name, "Mode: {} | XP: {} | Lvl: {} | Networks: {}", 
                        gotchi::getModeName(_currentMode), (int)stats.xp, (int)stats.level, (int)networks.size());
     }
+}
+
+lv_color_t getHeatmapColor(int networkCount) {
+    if (networkCount == 0) return lv_color_hex(0x444444);
+    if (networkCount <= 2) return lv_color_hex(0x00FF00);
+    if (networkCount <= 5) return lv_color_hex(0xFFFF00);
+    if (networkCount <= 9) return lv_color_hex(0xFF8800);
+    return lv_color_hex(0xFF0000);
+}
+
+lv_color_t getHeatmapBgColor(int networkCount) {
+    if (networkCount == 0) return lv_color_hex(0x222222);
+    if (networkCount <= 2) return lv_color_hex(0x002200);
+    if (networkCount <= 5) return lv_color_hex(0x222200);
+    if (networkCount <= 9) return lv_color_hex(0x221100);
+    return lv_color_hex(0x220000);
+}
+
+void AppGotchi::createSpectrumLabels() {
+    if (_spectrumLabelsCreated) return;
+    
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+        _spectrumLabels[i] = std::make_unique<uitk::lvgl_cpp::Label>(lv_screen_active());
+        _spectrumLabels[i]->setSize(42, 38);
+        _spectrumLabels[i]->setRadius(4);
+        _spectrumLabels[i]->setTextFont(&lv_font_montserrat_14);
+        _spectrumLabels[i]->setTextAlign(LV_TEXT_ALIGN_CENTER);
+        
+        int col = i % 7;
+        int row = i / 7;
+        int x = 5 + col * 47;
+        int y = 165 + row * 42;
+        _spectrumLabels[i]->align(LV_ALIGN_TOP_LEFT, x, y);
+        
+        char chText[16];
+        snprintf(chText, sizeof(chText), "CH%d\n-", i + 1);
+        _spectrumLabels[i]->setText(chText);
+        _spectrumLabels[i]->setBgColor(lv_color_hex(0x222222));
+        _spectrumLabels[i]->setTextColor(lv_color_hex(0x888888));
+    }
+    _spectrumLabelsCreated = true;
+}
+
+void AppGotchi::updateSpectrumLabels() {
+    if (!_spectrumLabelsCreated) return;
+    
+    auto channels = gotchi::getChannelAnalysis();
+    
+    for (int i = 0; i < NUM_CHANNELS && i < (int)channels.size(); i++) {
+        int count = channels[i].networkCount;
+        
+        _spectrumLabels[i]->setBgColor(getHeatmapBgColor(count));
+        _spectrumLabels[i]->setTextColor(getHeatmapColor(count));
+        
+        char chText[16];
+        snprintf(chText, sizeof(chText), "CH%d\n%d", i + 1, count);
+        _spectrumLabels[i]->setText(chText);
+    }
+}
+
+void AppGotchi::destroySpectrumLabels() {
+    if (!_spectrumLabelsCreated) return;
+    
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+        _spectrumLabels[i].reset();
+    }
+    _spectrumLabelsCreated = false;
+}
+
+lv_color_t getSignalColor(int8_t rssi) {
+    if (rssi > -60) return lv_color_hex(0x00FF00);  // Strong - green
+    if (rssi > -80) return lv_color_hex(0xFFFF00);  // Medium - yellow
+    return lv_color_hex(0xFF4400);  // Weak - orange/red
+}
+
+lv_color_t getSignalBgColor(int8_t rssi) {
+    if (rssi > -60) return lv_color_hex(0x002200);
+    if (rssi > -80) return lv_color_hex(0x222200);
+    return lv_color_hex(0x220800);
+}
+
+void AppGotchi::createNetworkBars() {
+    if (_networkBarsCreated) return;
+    
+    for (int i = 0; i < MAX_NETWORK_BARS; i++) {
+        _networkBars[i] = std::make_unique<uitk::lvgl_cpp::Label>(lv_screen_active());
+        _networkBars[i]->setSize(68, 28);
+        _networkBars[i]->setRadius(3);
+        _networkBars[i]->setTextFont(&lv_font_montserrat_14);
+        _networkBars[i]->setTextAlign(LV_TEXT_ALIGN_LEFT);
+        
+        int col = i % 4;
+        int row = i / 4;
+        int x = 5 + col * 75;
+        int y = 160 + row * 32;
+        _networkBars[i]->align(LV_ALIGN_TOP_LEFT, x, y);
+        
+        _networkBars[i]->setText("");
+        _networkBars[i]->setBgColor(lv_color_hex(0x111111));
+        _networkBars[i]->setTextColor(lv_color_hex(0x888888));
+    }
+    _networkBarsCreated = true;
+}
+
+void AppGotchi::updateNetworkBars() {
+    if (!_networkBarsCreated) return;
+    
+    auto networks = gotchi::getNetworks();
+    
+    for (int i = 0; i < MAX_NETWORK_BARS; i++) {
+        if (i < (int)networks.size()) {
+            int idx = networks.size() - MAX_NETWORK_BARS + i;
+            if (idx < 0) idx = 0;
+            
+            auto& net = networks[idx];
+            int8_t rssi = net.rssi;
+            
+            _networkBars[i]->setBgColor(getSignalBgColor(rssi));
+            _networkBars[i]->setTextColor(getSignalColor(rssi));
+            
+            char barText[32];
+            snprintf(barText, sizeof(barText), "CH%d %ddBm", net.channel, (int)rssi);
+            _networkBars[i]->setText(barText);
+        } else {
+            _networkBars[i]->setBgColor(lv_color_hex(0x111111));
+            _networkBars[i]->setTextColor(lv_color_hex(0x444444));
+            _networkBars[i]->setText("-");
+        }
+    }
+}
+
+void AppGotchi::destroyNetworkBars() {
+    if (!_networkBarsCreated) return;
+    
+    for (int i = 0; i < MAX_NETWORK_BARS; i++) {
+        _networkBars[i].reset();
+    }
+    _networkBarsCreated = false;
+}
+
+void AppGotchi::createSignalBars() {
+    if (_signalBarsCreated) return;
+    
+    const char* labels[3] = {"STRONG", "MEDIUM", "WEAK"};
+    int bgColors[3] = {0x002200, 0x222200, 0x220800};
+    int fgColors[3] = {0x00FF00, 0xFFFF00, 0xFF6600};
+    
+    for (int i = 0; i < NUM_SIGNAL_BARS; i++) {
+        _signalBars[i] = std::make_unique<uitk::lvgl_cpp::Label>(lv_screen_active());
+        _signalBars[i]->setSize(90, 45);
+        _signalBars[i]->setRadius(4);
+        _signalBars[i]->setTextFont(&lv_font_montserrat_14);
+        _signalBars[i]->setTextAlign(LV_TEXT_ALIGN_CENTER);
+        
+        int x = 15 + i * 100;
+        int y = 160;
+        _signalBars[i]->align(LV_ALIGN_TOP_LEFT, x, y);
+        
+        _signalBars[i]->setBgColor(lv_color_hex(bgColors[i]));
+        _signalBars[i]->setTextColor(lv_color_hex(fgColors[i]));
+        _signalBars[i]->setText(labels[i]);
+    }
+    _signalBarsCreated = true;
+}
+
+void AppGotchi::updateSignalBars() {
+    if (!_signalBarsCreated) return;
+    
+    auto networks = gotchi::getNetworks();
+    int strong = 0, medium = 0, weak = 0;
+    
+    for (const auto& net : networks) {
+        if (net.rssi > -60) strong++;
+        else if (net.rssi > -80) medium++;
+        else weak++;
+    }
+    
+    char countText[3][20];
+    snprintf(countText[0], sizeof(countText[0]), "STRONG\n%d", strong);
+    snprintf(countText[1], sizeof(countText[1]), "MEDIUM\n%d", medium);
+    snprintf(countText[2], sizeof(countText[2]), "WEAK\n%d", weak);
+    
+    for (int i = 0; i < NUM_SIGNAL_BARS; i++) {
+        _signalBars[i]->setText(countText[i]);
+    }
+}
+
+void AppGotchi::destroySignalBars() {
+    if (!_signalBarsCreated) return;
+    
+    for (int i = 0; i < NUM_SIGNAL_BARS; i++) {
+        _signalBars[i].reset();
+    }
+    _signalBarsCreated = false;
+}
+
+void AppGotchi::createBLELabels() {
+    if (_bleLabelsCreated) return;
+    
+    for (int i = 0; i < MAX_BLE_DEVICES; i++) {
+        _bleLabels[i] = std::make_unique<uitk::lvgl_cpp::Label>(lv_screen_active());
+        _bleLabels[i]->setSize(145, 22);
+        _bleLabels[i]->setRadius(2);
+        _bleLabels[i]->setTextFont(&lv_font_montserrat_14);
+        _bleLabels[i]->setTextAlign(LV_TEXT_ALIGN_LEFT);
+        
+        int col = i % 2;
+        int row = i / 2;
+        int x = 5 + col * 155;
+        int y = 160 + row * 26;
+        _bleLabels[i]->align(LV_ALIGN_TOP_LEFT, x, y);
+        
+        _bleLabels[i]->setBgColor(lv_color_hex(0x111122));
+        _bleLabels[i]->setTextColor(lv_color_hex(0x8888FF));
+        _bleLabels[i]->setText("");
+    }
+    _bleLabelsCreated = true;
+}
+
+void AppGotchi::updateBLELabels() {
+    if (!_bleLabelsCreated) return;
+    
+    auto devices = gotchi::getBLEDevices();
+    
+    for (int i = 0; i < MAX_BLE_DEVICES; i++) {
+        if (i < (int)devices.size()) {
+            int idx = devices.size() - MAX_BLE_DEVICES + i;
+            if (idx < 0) idx = 0;
+            
+            auto& dev = devices[idx];
+            
+            _bleLabels[i]->setBgColor(lv_color_hex(0x111122));
+            _bleLabels[i]->setTextColor(lv_color_hex(0x66DDDD));
+            
+            char bleText[36];
+            snprintf(bleText, sizeof(bleText), "%s", dev.name);
+            _bleLabels[i]->setText(bleText);
+        } else {
+            _bleLabels[i]->setBgColor(lv_color_hex(0x111122));
+            _bleLabels[i]->setTextColor(lv_color_hex(0x444466));
+            _bleLabels[i]->setText("-");
+        }
+    }
+}
+
+void AppGotchi::destroyBLELabels() {
+    if (!_bleLabelsCreated) return;
+    
+    for (int i = 0; i < MAX_BLE_DEVICES; i++) {
+        _bleLabels[i].reset();
+    }
+    _bleLabelsCreated = false;
+}
+
+void AppGotchi::createHeaderBoxes() {
+    if (_headerBoxesCreated) return;
+    
+    for (int i = 0; i < NUM_HEADER_BOXES; i++) {
+        _headerBoxes[i] = std::make_unique<uitk::lvgl_cpp::Label>(lv_screen_active());
+        _headerBoxes[i]->setSize(70, 28);
+        _headerBoxes[i]->setRadius(3);
+        _headerBoxes[i]->setTextFont(&lv_font_montserrat_14);
+        _headerBoxes[i]->setTextAlign(LV_TEXT_ALIGN_CENTER);
+        
+        int x = 10 + i * 75;
+        int y = 8;
+        _headerBoxes[i]->align(LV_ALIGN_TOP_LEFT, x, y);
+        
+        _headerBoxes[i]->setText("-");
+        _headerBoxes[i]->setBgColor(lv_color_hex(0x111111));
+        _headerBoxes[i]->setTextColor(lv_color_hex(0x888888));
+    }
+    _headerBoxesCreated = true;
+}
+
+void AppGotchi::updateHeaderBoxes() {
+    if (!_headerBoxesCreated) return;
+    
+    auto stats = gotchi::getStats();
+    auto networks = gotchi::getNetworks();
+    auto devices = gotchi::getBLEDevices();
+    int progress = gotchi::getXPProgress(stats.xp, stats.level);
+    
+    char boxText[4][20];
+    lv_color_t boxBgColor, boxTextColor;
+    
+    // Set up box colors based on mode
+    switch (_currentMode) {
+        case gotchi::Mode::IDLE:
+            boxBgColor = lv_color_hex(0x003300);
+            boxTextColor = lv_color_hex(0x88FF88);
+            snprintf(boxText[0], 20, "IDLE");
+            snprintf(boxText[1], 20, "Lv:%d", (int)stats.level);
+            snprintf(boxText[2], 20, "XP:%d", (int)stats.xp);
+            snprintf(boxText[3], 20, "Nets:%d", (int)networks.size());
+            break;
+        case gotchi::Mode::SCOUT:
+            boxBgColor = lv_color_hex(0x001133);
+            boxTextColor = lv_color_hex(0x88CCFF);
+            {
+                int bestRssi = -100;
+                for (const auto& n : networks) if (n.rssi > bestRssi) bestRssi = n.rssi;
+                snprintf(boxText[0], 20, "SCOUT");
+                snprintf(boxText[1], 20, "Nets:%d", (int)networks.size());
+                snprintf(boxText[2], 20, "%ddBm", bestRssi > -100 ? bestRssi : 0);
+                snprintf(boxText[3], 20, "Lv%d %d%%", (int)stats.level, progress);
+            }
+            break;
+        case gotchi::Mode::HUNT:
+            boxBgColor = lv_color_hex(0x003300);
+            boxTextColor = lv_color_hex(0x88FF88);
+            {
+                int bestRssi = -100;
+                for (const auto& n : networks) if (n.rssi > bestRssi) bestRssi = n.rssi;
+                int hsCount = gotchi::getHandshakeCount();
+                snprintf(boxText[0], 20, "HUNT");
+                snprintf(boxText[1], 20, "Nets:%d", (int)networks.size());
+                snprintf(boxText[2], 20, "HS:%d", hsCount);
+                snprintf(boxText[3], 20, "Lv%d %d%%", (int)stats.level, progress);
+            }
+            break;
+        case gotchi::Mode::WARDIVE:
+            boxBgColor = lv_color_hex(0x331A00);
+            boxTextColor = lv_color_hex(0xFFCC66);
+            {
+                // Cycle through networks every 2 seconds
+                uint32_t now = GetHAL().millis();
+                if (now - _wardiveCycleTime > 2000) {
+                    _wardiveCycleTime = now;
+                    if (networks.size() > 0) {
+                        _wardiveCurrentNetworkIndex = (_wardiveCurrentNetworkIndex + 1) % networks.size();
+                    }
+                }
+                const char* gpsStr = stats.gpsValid ? "On" : "Off";
+                if (_wardiveCurrentNetworkIndex < (int)networks.size()) {
+                    auto& net = networks[_wardiveCurrentNetworkIndex];
+                    snprintf(boxText[2], 20, "%ddBm", (int)net.rssi);
+                } else {
+                    snprintf(boxText[2], 20, "No nets");
+                }
+                snprintf(boxText[0], 20, "WARDIVE");
+                snprintf(boxText[1], 20, "Nets:%d", (int)networks.size());
+                snprintf(boxText[3], 20, "GPS:%s S:%d", gpsStr, (int)stats.gpsSatellites);
+            }
+            break;
+        case gotchi::Mode::BLE_SCAN:
+            boxBgColor = lv_color_hex(0x002233);
+            boxTextColor = lv_color_hex(0x66FFFF);
+            snprintf(boxText[0], 20, "BLE");
+            snprintf(boxText[1], 20, "Devs:%d", (int)devices.size());
+            snprintf(boxText[2], 20, "Scan...");
+            snprintf(boxText[3], 20, "Lv%d %d%%", (int)stats.level, progress);
+            break;
+        case gotchi::Mode::SPECTRUM:
+            {
+                auto channels = gotchi::getChannelAnalysis();
+                int bestCh = 1, bestCount = 999, busiestCh = 1, busiestCount = 0, totalNets = 0;
+                for (const auto& ch : channels) {
+                    totalNets += ch.networkCount;
+                    if (ch.networkCount > busiestCount) { busiestCount = ch.networkCount; busiestCh = ch.channel; }
+                    if (ch.networkCount > 0 && ch.networkCount < bestCount) { bestCount = ch.networkCount; bestCh = ch.channel; }
+                }
+                boxBgColor = lv_color_hex(0x220033);
+                boxTextColor = lv_color_hex(0xFF66FF);
+                snprintf(boxText[0], 20, "SPECT");
+                snprintf(boxText[1], 20, "Best:CH%d", bestCh);
+                snprintf(boxText[2], 20, "Bsy:CH%d", busiestCh);
+                snprintf(boxText[3], 20, "Tot:%d", totalNets);
+            }
+            break;
+        case gotchi::Mode::ROGUE:
+            {
+                auto& rogue = gotchi::getRogueManager();
+                const char* target = rogue.getTargetSSID();
+                uint8_t ch = rogue.getTargetChannel();
+                bool running = rogue.isActive();
+                boxBgColor = lv_color_hex(0x332200);
+                boxTextColor = running ? lv_color_hex(0xFFAA44) : lv_color_hex(0xFFCC88);
+                snprintf(boxText[0], 20, "ROGUE");
+                snprintf(boxText[1], 20, "%.12s", target);
+                snprintf(boxText[2], 20, "CH:%d", (int)ch);
+                snprintf(boxText[3], 20, running ? "● On" : "○ Off");
+            }
+            break;
+        case gotchi::Mode::CONFIG:
+            boxBgColor = lv_color_hex(0x003333);
+            boxTextColor = lv_color_hex(0x88FFFF);
+            snprintf(boxText[0], 20, "CONFIG");
+            snprintf(boxText[1], 20, "WiFi:%s", gotchi::isConfigMode() ? "On" : "Off");
+            snprintf(boxText[2], 20, "192.168.4.1");
+            snprintf(boxText[3], 20, "TAP EXIT");
+            break;
+        case gotchi::Mode::STATS:
+            boxBgColor = lv_color_hex(0x330033);
+            boxTextColor = lv_color_hex(0xFF88FF);
+            snprintf(boxText[0], 20, "Lv:%d%s", (int)stats.level, stats.prestige > 0 ? "+P" : "");
+            snprintf(boxText[1], 20, "XP:%d", (int)stats.xp);
+            snprintf(boxText[2], 20, "Ach:%d/17", (int)stats.achievementCount);
+            snprintf(boxText[3], 20, "Up:%dh%dm", (int)(stats.uptimeSeconds / 3600), (int)((stats.uptimeSeconds % 3600) / 60));
+            break;
+        default:
+            boxBgColor = lv_color_hex(0x111111);
+            boxTextColor = lv_color_hex(0x888888);
+            snprintf(boxText[0], 20, "MODE");
+            snprintf(boxText[1], 20, "-");
+            snprintf(boxText[2], 20, "-");
+            snprintf(boxText[3], 20, "-");
+            break;
+    }
+    
+    for (int i = 0; i < NUM_HEADER_BOXES; i++) {
+        _headerBoxes[i]->setBgColor(boxBgColor);
+        _headerBoxes[i]->setTextColor(boxTextColor);
+        _headerBoxes[i]->setText(boxText[i]);
+    }
+}
+
+void AppGotchi::destroyHeaderBoxes() {
+    if (!_headerBoxesCreated) return;
+    
+    for (int i = 0; i < NUM_HEADER_BOXES; i++) {
+        _headerBoxes[i].reset();
+    }
+    _headerBoxesCreated = false;
 }

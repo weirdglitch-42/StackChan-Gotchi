@@ -35,6 +35,7 @@ private:
     static esp_err_t apiFilesHandler(httpd_req_t* req);
     static esp_err_t apiWigleHandler(httpd_req_t* req);
     static esp_err_t apiPwnagotchiHandler(httpd_req_t* req);
+    static esp_err_t apiPermissionsHandler(httpd_req_t* req);
 
     // HTML generation
     const char* generateHtml();
