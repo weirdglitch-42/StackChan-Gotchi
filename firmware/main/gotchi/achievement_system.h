@@ -36,4 +36,6 @@ private:
     bool _initialized;
 };
 
+AchievementSystem& getAchievementSystem();
+
 }

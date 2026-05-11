@@ -107,7 +107,19 @@ idf.py -p COM8 flash monitor
 ```
 firmware/main/
 ├── apps/app_gotchi/     - Main UI and mode handling
-├── gotchi/              - Core scanning logic, XP system, GPS, storage
+├── gotchi/              - Core scanning logic (OOP refactored)
+│   ├── gotchi.cpp/h    - Core API (335 lines)
+│   ├── mode_manager.cpp/h    - Mode state machine
+│   ├── wifi_scanner.cpp/h     - WiFi promiscuous + hopping
+│   ├── handshake_parser.cpp/h - EAPOL parsing
+│   ├── deauth_manager.cpp/h  - Deauth attack logic
+│   ├── ble_scanner.cpp/h      - BLE GAP scanning
+│   ├── network_db.cpp/h      - Network/handshake/BLE storage
+│   ├── xp_system.cpp/h       - XP/level progression
+│   ├── achievement_system.cpp/h - Achievements & challenges
+│   ├── gps.cpp/h             - GPS NMEA parsing
+│   ├── rogue_manager.cpp/h   - ROGUE mode beacon spam
+│   └── web_manager.cpp/h     - CONFIG mode HTTP server
 └── hal/board/           - StackChan board initialization
 ```
 

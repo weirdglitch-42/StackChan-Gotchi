@@ -37,4 +37,6 @@ private:
     bool _initialized;
 };
 
+XPSystem& getXPSystem();
+
 }

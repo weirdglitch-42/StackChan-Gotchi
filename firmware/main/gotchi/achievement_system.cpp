@@ -133,4 +133,10 @@ void AchievementSystem::saveToNVS() {
     nvs_close(nvs);
 }
 
+static AchievementSystem _achievementSystem;
+
+AchievementSystem& getAchievementSystem() {
+    return _achievementSystem;
+}
+
 }
