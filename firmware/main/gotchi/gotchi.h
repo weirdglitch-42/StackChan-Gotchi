@@ -16,11 +16,14 @@ namespace gotchi {
 
 enum class Mode {
     IDLE,
-    SNIFF,
     SCOUT,
+    HUNT,
     WARDIVE,
     SPECTRUM,
-    BLE_SNIFF
+    BLE_SCAN,
+    ROGUE,
+    STATS,
+    CONFIG
 };
 
 enum class Mood {
@@ -67,9 +70,47 @@ std::vector<HandshakeInfo> getHandshakes();
 int getHandshakeCount();
 bool hasCompleteHandshake(const uint8_t* bssid);
 
+struct ChannelInfo {
+    uint8_t channel;
+    uint8_t networkCount;
+    int8_t maxRssi;
+    int8_t avgRssi;
+};
+
+std::vector<ChannelInfo> getChannelAnalysis();
+
+bool hasStorage();
+
+const char* getModeName(Mode mode);
+const char* getLevelTitle(int level);
+int getXPForLevel(int level);
+int getXPProgress(int32_t xp, int level);
+bool isDeepThoughtUnlocked();
+uint8_t getPrestige();
+uint32_t getAchievementCount();
+uint32_t getAchievementsBitmask();  // Get full achievement bitmask
+
+// Challenge system
+struct ChallengeInfo {
+    const char* name;
+    const char* description;
+    int32_t xpReward;
+    bool isDaily;
+    bool isOneTime;
+};
+
+bool getDailyChallenge(ChallengeInfo& challenge);
+bool completeDailyChallenge();
+bool hasCompletedOneTimeChallenge(int id);
+bool completeOneTimeChallenge(int id);
+void refreshDailyChallenge();
+
+// Stats extended
 struct Stats {
     int32_t xp;
     int32_t level;
+    uint32_t prestige;
+    uint32_t achievementCount;
     uint32_t networksFound;
     uint32_t handshakesCaptured;
     uint32_t channelsScanned;
@@ -91,22 +132,6 @@ struct Stats {
     double gpsLon;
 };
 
-struct ChannelInfo {
-    uint8_t channel;
-    uint8_t networkCount;
-    int8_t maxRssi;
-    int8_t avgRssi;
-};
-
-std::vector<ChannelInfo> getChannelAnalysis();
-
-bool hasStorage();
-
-const char* getModeName(Mode mode);
-const char* getLevelTitle(int level);
-int getXPForLevel(int level);
-int getXPProgress(int32_t xp, int level);  // Returns progress to next level as percentage (0-100)
-
 void init();
 void update();
 void shutdown();
@@ -120,6 +145,8 @@ Mood getCurrentMood();
 Stats getStats();
 GotchiConfig getConfig();
 void addXP(int32_t amount);
+bool shouldShowHuntDisclaimer();
+void acknowledgeHuntDisclaimer();
 
 std::vector<NetworkInfo> getNetworks();
 
@@ -127,8 +154,14 @@ void startSniff();
 void stopSniff();
 void startScout();
 void stopScout();
+void startRogue();
+void stopRogue();
+void startConfigMode();
+void stopConfigMode();
 
 bool isSniffing();
+bool isBeaconSpamming();
+bool isConfigMode();
 
 std::vector<BLEDeviceInfo> getBLEDevices();
 void startBLEScan();

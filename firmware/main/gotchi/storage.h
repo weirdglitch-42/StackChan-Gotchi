@@ -4,6 +4,7 @@
  */
 #pragma once
 #include <vector>
+#include <cstring>
 #include <gotchi/gps.h>
 #include <gotchi/gotchi.h>
 
@@ -13,6 +14,11 @@ static const size_t MAX_STORED_NETWORKS = 5000;
 static const int MAX_LOG_FILES = 5;
 
 struct GotchiConfig {
+    char defaultMode[16];
+    int neonBrightness;
+    int headSpeed;
+    bool autoRotateModes;
+    bool audioEnabled;
     char wigleApiKey[128];
     char wigleUsername[64];
     char wpasecKey[128];
@@ -20,8 +26,14 @@ struct GotchiConfig {
     bool autoWpasecUpload;
     int logRotationDays;
     int maxNetworks;
+    bool huntDisclaimerShown;
     
     GotchiConfig() {
+        strcpy(defaultMode, "SCOUT");
+        neonBrightness = 255;
+        headSpeed = 1;
+        autoRotateModes = false;
+        audioEnabled = true;
         wigleApiKey[0] = '\0';
         wigleUsername[0] = '\0';
         wpasecKey[0] = '\0';
@@ -29,6 +41,7 @@ struct GotchiConfig {
         autoWpasecUpload = false;
         logRotationDays = 7;
         maxNetworks = MAX_STORED_NETWORKS;
+        huntDisclaimerShown = false;
     }
 };
 

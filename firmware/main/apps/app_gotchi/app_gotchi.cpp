@@ -58,7 +58,7 @@ void AppGotchi::onOpen() {
     _statsLabel->setTextFont(&lv_font_montserrat_14);
     _statsLabel->setTextColor(lv_color_hex(0x00FF88));
     _statsLabel->setTextAlign(LV_TEXT_ALIGN_LEFT);
-    _statsLabel->setSize(300, 50);
+    _statsLabel->setSize(300, 75);  // Taller for 3-line display
     _statsLabel->align(LV_ALIGN_TOP_LEFT, 5, 5);
     _statsLabel->setText("Nets:0 XP:0 Lvl:1 | Scanning...");
 
@@ -74,10 +74,25 @@ void AppGotchi::onOpen() {
     _networkListLabel->setText("Nearby networks will appear here...");
 
     _isRunning = true;
-    _currentMode = gotchi::Mode::SNIFF;  // Auto-start in SNIFF mode
     _lastModeChange = GetHAL().millis();
-
-    gotchi::setMode(gotchi::Mode::SNIFF);  // Auto-start scanning
+    
+    // Load config and set default mode
+    gotchi::GotchiConfig config = gotchi::getConfig();
+    gotchi::Mode defaultMode = gotchi::Mode::SCOUT;
+    
+    if (strlen(config.defaultMode) > 0) {
+        if (strcmp(config.defaultMode, "HUNT") == 0) defaultMode = gotchi::Mode::HUNT;
+        else if (strcmp(config.defaultMode, "SCOUT") == 0) defaultMode = gotchi::Mode::SCOUT;
+        else if (strcmp(config.defaultMode, "WARDIVE") == 0) defaultMode = gotchi::Mode::WARDIVE;
+        else if (strcmp(config.defaultMode, "SPECTRUM") == 0) defaultMode = gotchi::Mode::SPECTRUM;
+        else if (strcmp(config.defaultMode, "BLE_SCAN") == 0) defaultMode = gotchi::Mode::BLE_SCAN;
+        else if (strcmp(config.defaultMode, "ROGUE") == 0) defaultMode = gotchi::Mode::ROGUE;
+        else if (strcmp(config.defaultMode, "STATS") == 0) defaultMode = gotchi::Mode::STATS;
+        else if (strcmp(config.defaultMode, "IDLE") == 0) defaultMode = gotchi::Mode::IDLE;
+    }
+    
+    _currentMode = defaultMode;
+    gotchi::setMode(defaultMode);
     
     if (GetStackChan().hasAvatar()) {
         GetStackChan().avatar().setSpeech("Scanning...");
@@ -167,45 +182,116 @@ void AppGotchi::handleInput() {
     lv_point_t point;
     lv_indev_get_point(touch, &point);
 
-    // Require long press in top area to change mode (prevents accidental triggers)
-    if (state == LV_INDEV_STATE_PRESSED) {
-        if (point.y < 80) {
-            if (_pressStartTime == 0) {
-                _pressStartTime = GetHAL().millis();
-            }
-            // Require 500ms hold in top area
-            if (GetHAL().millis() - _pressStartTime > 500 &&
-                GetHAL().millis() - _lastModeChange > 1000) {
+    // Screen dimensions: 320x240
+    // Left side (x < 160) = cycle forward
+    // Right side (x >= 160) = cycle backward  
+    // Long press at top (y < 50) = enter CONFIG mode
+    
+    // If in CONFIG mode, any tap exits to SCOUT
+    if (_currentMode == gotchi::Mode::CONFIG) {
+        if (state == LV_INDEV_STATE_PRESSED && _pressStartTime == 0) {
+            _pressStartTime = GetHAL().millis();
+        }
+        if (state == LV_INDEV_STATE_RELEASED && _pressStartTime > 0) {
+            if (GetHAL().millis() - _pressStartTime < 500) {
+                // Quick tap exits CONFIG mode
+                _currentMode = gotchi::Mode::SCOUT;
+                gotchi::setMode(_currentMode);
                 _lastModeChange = GetHAL().millis();
-                cycleMode();
+                _pressStartTime = 0;
+                
+                if (GetStackChan().hasAvatar()) {
+                    GetStackChan().avatar().setSpeech("SCOUT");
+                }
+                return;
             }
-        } else {
             _pressStartTime = 0;
         }
+        return;  // Don't process other input in CONFIG mode
+    }
+    
+    if (state == LV_INDEV_STATE_PRESSED) {
+        if (_pressStartTime == 0) {
+            // Pause motion when screen is touched
+            if (GetStackChan().hasMotion()) {
+                GetStackChan().motion().setTorqueEnabled(false);
+            }
+            _pressStartTime = GetHAL().millis();
+            _pressX = point.x;
+            _pressY = point.y;
+        }
+        
+        // Check for long press at top of screen to enter CONFIG mode
+        if (point.y < 50) {
+            // Require 1 second hold in top area to enter CONFIG
+            if (GetHAL().millis() - _pressStartTime > 1000 &&
+                GetHAL().millis() - _lastModeChange > 2000) {
+                
+                // Enter CONFIG mode
+                _currentMode = gotchi::Mode::CONFIG;
+                gotchi::setMode(_currentMode);
+                _lastModeChange = GetHAL().millis();
+                _pressStartTime = 0;
+                
+                if (GetStackChan().hasAvatar()) {
+                    GetStackChan().avatar().setSpeech("CONFIG");
+                }
+            }
+        }
     } else {
+        // Touch released - check if it was a tap
+        if (_pressStartTime > 0 && GetHAL().millis() - _pressStartTime < 300) {
+            // Left side tap = cycle forward
+            if (_pressX < 160) {
+                if (GetHAL().millis() - _lastModeChange > 500) {
+                    _lastModeChange = GetHAL().millis();
+                    cycleMode();
+                }
+            }
+            // Right side tap = cycle backward
+            else {
+                if (GetHAL().millis() - _lastModeChange > 500) {
+                    _lastModeChange = GetHAL().millis();
+                    cycleModeBackward();
+                }
+            }
+        }
+        // Resume motion when screen is released
+        if (GetStackChan().hasMotion()) {
+            GetStackChan().motion().setTorqueEnabled(true);
+        }
         _pressStartTime = 0;
     }
 }
 
 void AppGotchi::cycleMode() {
     switch (_currentMode) {
-        case gotchi::Mode::IDLE:
-            _currentMode = gotchi::Mode::SNIFF;
-            break;
-        case gotchi::Mode::SNIFF:
-            _currentMode = gotchi::Mode::SCOUT;
-            break;
         case gotchi::Mode::SCOUT:
+            _currentMode = gotchi::Mode::HUNT;
+            break;
+        case gotchi::Mode::HUNT:
             _currentMode = gotchi::Mode::WARDIVE;
             break;
         case gotchi::Mode::WARDIVE:
             _currentMode = gotchi::Mode::SPECTRUM;
             break;
         case gotchi::Mode::SPECTRUM:
-            _currentMode = gotchi::Mode::BLE_SNIFF;
+            _currentMode = gotchi::Mode::BLE_SCAN;
             break;
-        case gotchi::Mode::BLE_SNIFF:
+        case gotchi::Mode::BLE_SCAN:
+            _currentMode = gotchi::Mode::ROGUE;
+            break;
+        case gotchi::Mode::ROGUE:
+            _currentMode = gotchi::Mode::STATS;
+            break;
+        case gotchi::Mode::STATS:
             _currentMode = gotchi::Mode::IDLE;
+            break;
+        case gotchi::Mode::IDLE:
+            _currentMode = gotchi::Mode::SCOUT;
+            break;
+        case gotchi::Mode::CONFIG:
+            _currentMode = gotchi::Mode::SCOUT;
             break;
     }
 
@@ -213,19 +299,114 @@ void AppGotchi::cycleMode() {
 
     // Show mode in speech bubble
     const char* modeName = gotchi::getModeName(_currentMode);
+    bool showedSpecialMessage = false;
+
+    // Show "OK" disclaimer when first entering HUNT mode
+    if (_currentMode == gotchi::Mode::HUNT && gotchi::shouldShowHuntDisclaimer()) {
+        gotchi::acknowledgeHuntDisclaimer();
+        if (GetStackChan().hasAvatar()) {
+            GetStackChan().avatar().setSpeech("HUNT Mode!\nSends deauth frames.\nOK to proceed?");
+            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(4000, 180, true));
+        }
+        showedSpecialMessage = true;
+    }
+
+    // Show educational warning for ROGUE mode (only if not already showing HUNT disclaimer)
+    if (!showedSpecialMessage && _currentMode == gotchi::Mode::ROGUE) {
+        if (GetStackChan().hasAvatar()) {
+            GetStackChan().avatar().setSpeech("EDUCATIONAL!\nOwn networks only!");
+            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(3000, 180, true));
+        }
+        showedSpecialMessage = true;
+    }
 
     // Play different tone for each mode (bypasses xiaozhi AudioService to avoid WiFi conflict)
     uint16_t tone_freq = 600;
     switch (_currentMode) {
-        case gotchi::Mode::SNIFF: tone_freq = 600; break;   // Low beep
+        case gotchi::Mode::HUNT: tone_freq = 600; break;   // Low beep
         case gotchi::Mode::SCOUT: tone_freq = 800; break;   // Mid beep
         case gotchi::Mode::WARDIVE: tone_freq = 1000; break; // Higher beep
         case gotchi::Mode::SPECTRUM: tone_freq = 1200; break; // Highest beep
+        
+        case gotchi::Mode::ROGUE: tone_freq = 350; break;   // Warning lower tone
         default: tone_freq = 400; break;  // IDLE - very low
     }
     hal_bridge::app_play_tone(tone_freq, 100);
 
-    if (GetStackChan().hasAvatar()) {
+    // Only show mode name if no special message was shown
+    if (!showedSpecialMessage && GetStackChan().hasAvatar()) {
+        GetStackChan().avatar().setSpeech(modeName);
+        GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(1500, 180, true));
+    }
+}
+
+void AppGotchi::cycleModeBackward() {
+    switch (_currentMode) {
+        case gotchi::Mode::HUNT:
+            _currentMode = gotchi::Mode::SCOUT;
+            break;
+        case gotchi::Mode::SCOUT:
+            _currentMode = gotchi::Mode::IDLE;
+            break;
+        case gotchi::Mode::IDLE:
+            _currentMode = gotchi::Mode::STATS;
+            break;
+        case gotchi::Mode::STATS:
+            _currentMode = gotchi::Mode::ROGUE;
+            break;
+        case gotchi::Mode::ROGUE:
+            _currentMode = gotchi::Mode::BLE_SCAN;
+            break;
+        case gotchi::Mode::BLE_SCAN:
+            _currentMode = gotchi::Mode::SPECTRUM;
+            break;
+        case gotchi::Mode::SPECTRUM:
+            _currentMode = gotchi::Mode::WARDIVE;
+            break;
+        case gotchi::Mode::WARDIVE:
+            _currentMode = gotchi::Mode::HUNT;
+            break;
+        default:
+            _currentMode = gotchi::Mode::SCOUT;
+            break;
+    }
+
+    gotchi::setMode(_currentMode);
+
+    const char* modeName = gotchi::getModeName(_currentMode);
+    bool showedSpecialMessage = false;
+
+    // Show "OK" disclaimer when first entering HUNT mode (from backward too)
+    if (_currentMode == gotchi::Mode::HUNT && gotchi::shouldShowHuntDisclaimer()) {
+        gotchi::acknowledgeHuntDisclaimer();
+        if (GetStackChan().hasAvatar()) {
+            GetStackChan().avatar().setSpeech("HUNT Mode!\nSends deauth frames.\nOK to proceed?");
+            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(4000, 180, true));
+        }
+        showedSpecialMessage = true;
+    }
+
+    // Show educational warning for ROGUE mode (from backward too)
+    if (!showedSpecialMessage && _currentMode == gotchi::Mode::ROGUE) {
+        if (GetStackChan().hasAvatar()) {
+            GetStackChan().avatar().setSpeech("EDUCATIONAL!\nOwn networks only!");
+            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(3000, 180, true));
+        }
+        showedSpecialMessage = true;
+    }
+
+    uint16_t tone_freq = 600;
+    switch (_currentMode) {
+        case gotchi::Mode::HUNT: tone_freq = 600; break;
+        case gotchi::Mode::SCOUT: tone_freq = 800; break;
+        case gotchi::Mode::WARDIVE: tone_freq = 1000; break;
+        case gotchi::Mode::SPECTRUM: tone_freq = 1200; break;
+        case gotchi::Mode::ROGUE: tone_freq = 350; break;
+        default: tone_freq = 400; break;
+    }
+    hal_bridge::app_play_tone(tone_freq, 100);
+
+    if (!showedSpecialMessage && GetStackChan().hasAvatar()) {
         GetStackChan().avatar().setSpeech(modeName);
         GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(1500, 180, true));
     }
@@ -241,7 +422,7 @@ void AppGotchi::updateAvatar() {
     avatar::Emotion baseEmotion = avatar::Emotion::Neutral;
     
     switch (_currentMode) {
-        case gotchi::Mode::SNIFF:
+        case gotchi::Mode::HUNT:
             baseEmotion = avatar::Emotion::Doubt;  // Scanning/alert
             break;
         case gotchi::Mode::SCOUT:
@@ -253,11 +434,20 @@ void AppGotchi::updateAvatar() {
         case gotchi::Mode::SPECTRUM:
             baseEmotion = avatar::Emotion::Doubt;   // Analyzing
             break;
-        case gotchi::Mode::BLE_SNIFF:
+        case gotchi::Mode::BLE_SCAN:
             baseEmotion = avatar::Emotion::Doubt;   // BLE scanning
+            break;
+        case gotchi::Mode::ROGUE:
+            baseEmotion = avatar::Emotion::Angry;   // Active attack - warning
+            break;
+        case gotchi::Mode::STATS:
+            baseEmotion = avatar::Emotion::Happy;   // Viewing stats
             break;
         case gotchi::Mode::IDLE:
             baseEmotion = avatar::Emotion::Neutral;
+            break;
+        case gotchi::Mode::CONFIG:
+            baseEmotion = avatar::Emotion::Neutral;  // Config mode - neutral
             break;
     }
     
@@ -290,7 +480,7 @@ void AppGotchi::updateHeadAnimation() {
     auto& motion = GetStackChan().motion();
 
     static const uint32_t IDLE_INTERVAL = 3000;
-    static const uint32_t SNIFF_INTERVAL = 800;
+    static const uint32_t HUNT_INTERVAL = 800;
     static const uint32_t SCOUT_INTERVAL = 1500;
 
     uint32_t interval = IDLE_INTERVAL;
@@ -298,8 +488,8 @@ void AppGotchi::updateHeadAnimation() {
     int16_t basePitch = 200;
 
     switch (_currentMode) {
-        case gotchi::Mode::SNIFF:
-            interval = SNIFF_INTERVAL;
+        case gotchi::Mode::HUNT:
+            interval = HUNT_INTERVAL;
             break;
         case gotchi::Mode::SCOUT:
             interval = SCOUT_INTERVAL;
@@ -313,8 +503,15 @@ void AppGotchi::updateHeadAnimation() {
             interval = 1000;
             baseYaw = (int16_t)((now / interval) % 6 - 3) * 150;
             break;
-        case gotchi::Mode::BLE_SNIFF:
+        case gotchi::Mode::BLE_SCAN:
             interval = 600;
+            break;
+        case gotchi::Mode::ROGUE:
+            interval = 500;
+            baseYaw = (int16_t)((now / 250 % 4) - 2) * 120;
+            break;
+        case gotchi::Mode::STATS:
+            interval = 2000;  // Slow movement while viewing stats
             break;
         default:
             break;
@@ -326,12 +523,12 @@ void AppGotchi::updateHeadAnimation() {
         _lastHeadAnim = now;
         targetChanged = true;
 
-        if (_currentMode == gotchi::Mode::IDLE) {
+        if (_currentMode == gotchi::Mode::IDLE || _currentMode == gotchi::Mode::STATS) {
             static bool idleDir = false;
             _headYawOffset = idleDir ? 150 : -150;
             idleDir = !idleDir;
             _headPitchOffset = (now / 4000 % 2) ? 30 : -30;
-        } else if (_currentMode == gotchi::Mode::SNIFF) {
+        } else if (_currentMode == gotchi::Mode::HUNT) {
             auto networks = gotchi::getNetworks();
             int netCount = networks.size();
             
@@ -348,13 +545,17 @@ void AppGotchi::updateHeadAnimation() {
         } else if (_currentMode == gotchi::Mode::SCOUT) {
             _headYawOffset = (int16_t)((now / 500 % 4) - 2) * 100;
             _headPitchOffset = (int16_t)((now / 800 % 3) - 1) * 30;
-        } else if (_currentMode == gotchi::Mode::BLE_SNIFF) {
+        } else if (_currentMode == gotchi::Mode::BLE_SCAN) {
             auto devices = gotchi::getBLEDevices();
             int devCount = devices.size();
             
             int yawRange = (devCount >= 10) ? 180 : (devCount >= 5) ? 150 : 100;
             _headYawOffset = (int16_t)(sin(now / 600.0) * yawRange);
             _headPitchOffset = (now / 1200 % 2) ? 20 : -20;
+        } else if (_currentMode == gotchi::Mode::ROGUE) {
+            // Fast sweeping head during beacon spam
+            _headYawOffset = (int16_t)((now / 200 % 8) - 4) * 80;
+            _headPitchOffset = (now / 400 % 2) ? 15 : -15;
         }
     }
 
@@ -416,7 +617,7 @@ void AppGotchi::updateNeonLights() {
             }
             break;
 
-        case gotchi::Mode::SNIFF:
+        case gotchi::Mode::HUNT:
             // Dynamic colors based on network count
             if (netCount >= 10) {
                 // EXCITED - lots of networks!
@@ -481,7 +682,7 @@ void AppGotchi::updateNeonLights() {
             break;
         }
 
-        case gotchi::Mode::BLE_SNIFF: {
+        case gotchi::Mode::BLE_SCAN: {
             // Blue/Magenta pulse - BLE scanning
             if (blinkOn) {
                 leftLight.setColor(0x00, 0x88, 0xFF);
@@ -489,6 +690,43 @@ void AppGotchi::updateNeonLights() {
             } else {
                 leftLight.setColor(0x00, 0x44, 0x88);
                 rightLight.setColor(0x44, 0x00, 0x88);
+            }
+            break;
+        }
+
+        case gotchi::Mode::STATS: {
+            // Purple/White pulse - viewing stats
+            if (blinkOn) {
+                leftLight.setColor(0xAA, 0x00, 0xFF);
+                rightLight.setColor(0xFF, 0xFF, 0xFF);
+            } else {
+                leftLight.setColor(0x55, 0x00, 0x88);
+                rightLight.setColor(0x88, 0x88, 0x88);
+            }
+            break;
+        }
+
+        case gotchi::Mode::ROGUE: {
+            // Yellow/Orange fast pulse - beacon spam active
+            uint8_t flashPhase = (now / 80) % 4;
+            if (flashPhase < 2) {
+                leftLight.setColor(0xFF, 0xAA, 0x00);
+                rightLight.setColor(0xFF, 0x88, 0x00);
+            } else {
+                leftLight.setColor(0xAA, 0x55, 0x00);
+                rightLight.setColor(0xAA, 0x44, 0x00);
+            }
+            break;
+        }
+
+        case gotchi::Mode::CONFIG: {
+            // White/Cyan slow pulse - config mode
+            if (blinkOn) {
+                leftLight.setColor(0xAA, 0xFF, 0xFF);
+                rightLight.setColor(0xFF, 0xFF, 0xFF);
+            } else {
+                leftLight.setColor(0x55, 0xAA, 0xAA);
+                rightLight.setColor(0x88, 0x88, 0x88);
             }
             break;
         }
@@ -605,23 +843,120 @@ void AppGotchi::renderUI() {
                      2.4 + (stats.currentChannel - 1) * 0.016,
                      stats.currentChannel, (int)stats.level, progress);
         }
+    }
+    // ROGUE mode - show educational warning
+    else if (_currentMode == gotchi::Mode::ROGUE) {
+        _statsLabel->setBgColor(lv_color_hex(0x332200));  // Dark orange background
+        _statsLabel->setTextColor(lv_color_hex(0xFFCC88));  // Light orange text
+        
+        snprintf(statsText, sizeof(statsText), 
+                 "ROGUE MODE!\n"
+                 "Educational Only!\n"
+                 "Use on OWN networks only!");
+        _statsLabel->setText(statsText);
+        
+        // Show warning in network list area
+        _networkListLabel->setBgColor(lv_color_hex(0x221100));
+        _networkListLabel->setTextColor(lv_color_hex(0xFFAA66));
+        _networkListLabel->setText("Broadcasting fake APs...\n"
+                                   "Creates rogue access points.\n"
+                                   "FOR EDUCATIONAL USE ONLY!\n"
+                                   "Demonstrates rogue AP attacks.");
+        
+        if (GetStackChan().hasAvatar()) {
+            GetStackChan().avatar().setSpeech("ROGUE!\nFake APs!\nEducational only!");
+        }
+    }
+    // CONFIG mode - show config UI
+    else if (_currentMode == gotchi::Mode::CONFIG) {
+        _statsLabel->setBgColor(lv_color_hex(0x003333));  // Dark cyan background
+        _statsLabel->setTextColor(lv_color_hex(0x88FFFF));  // Light cyan text
+        
+        snprintf(statsText, sizeof(statsText), 
+                 "CONFIG MODE\n"
+                 "Tap to exit\n"
+                 "WiFi: %s",
+                 gotchi::isConfigMode() ? "Active" : "Inactive");
+        _statsLabel->setText(statsText);
+        
+        // Show config instructions in network list area
+        _networkListLabel->setSize(300, 50);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
+        _networkListLabel->setBgColor(lv_color_hex(0x002222));
+        _networkListLabel->setTextColor(lv_color_hex(0x88AAAA));
+        _networkListLabel->setText("CONFIG MODE\n"
+                                    "AP: StackChan-Config\n"
+                                    "Join then visit http://192.168.4.1\n"
+                                    "Or edit /sd/config.json on SD card\n"
+                                    "\n"
+                                    "Tap anywhere to exit");
+    }
+    // STATS mode check BEFORE network check (priority display)
+    else if (_currentMode == gotchi::Mode::STATS) {
+        const char* prestigeStr = stats.prestige > 0 ? "+P" : "";
+        const char* dtStr = gotchi::isDeepThoughtUnlocked() ? "*" : "";
+        
+        // Full stats display - top section shows key stats
+        _statsLabel->setSize(320, 70);
+        _statsLabel->align(LV_ALIGN_TOP_MID, 0, 5);
+        _statsLabel->setBgColor(lv_color_hex(0x330033));  // Purple background
+        _statsLabel->setTextColor(lv_color_hex(0xFF88FF));  // Light purple text
+        
+        // Reset network list label for STATS mode
+        _networkListLabel->setSize(320, 185);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_MID, 0, -5);
+        _networkListLabel->setBgColor(lv_color_hex(0x220033));  // Dark purple
+        _networkListLabel->setTextColor(lv_color_hex(0xFF88FF));
+        
+        snprintf(statsText, sizeof(statsText), 
+                 "Lv:%d%s%s XP:%d\n"           // Line 1: Level, prestige, XP
+                 "Ach:%u/17 Uptime:%02uh%02um", // Line 2: Achievements, uptime
+                 (int)stats.level, prestigeStr, dtStr,
+                 (int)stats.xp,
+                 (unsigned)stats.achievementCount,
+                 (unsigned)(stats.uptimeSeconds / 3600),
+                 (unsigned)((stats.uptimeSeconds % 3600) / 60));
+        
+        // Hide avatar speech in STATS mode
+        if (GetStackChan().hasAvatar()) {
+            GetStackChan().avatar().setSpeech("");
+        }
     } else if (networks.size() > 0) {
+        // 3-line format: Line1=Network, Line2=Level/XP, Line3=Other
         int progress = gotchi::getXPProgress(stats.xp, stats.level);
-        snprintf(statsText, sizeof(statsText), "Nets:%d|Lv:%d %d%%|CH%d|%s%d HS|%s|%s",
-                 (int)networks.size(),
-                 (int)stats.level, progress,
-                 stats.currentChannel, hsIcon, hsCount,
-                 bestSsid, gpsDisplay);
+        snprintf(statsText, sizeof(statsText), 
+                 "Nets:%d Ch%d %s\n"        // Line 1: Networks, channel, best SSID
+                 "Lv:%d XP:%d %d%%\n"       // Line 2: Level, XP, progress
+                 "HS:%d GPS:%s",            // Line 3: Handshakes, GPS
+                 (int)networks.size(), 
+                 stats.currentChannel, bestSsid,
+                 (int)stats.level, (int)stats.xp, progress,
+                 hsCount, gpsDisplay);
     } else {
+        // Reset label positions and colors for other modes (no networks found)
+        _statsLabel->setSize(300, 75);
+        _statsLabel->align(LV_ALIGN_TOP_LEFT, 5, 5);
+        _statsLabel->setBgColor(lv_color_hex(0x003320));  // Reset to green
+        _statsLabel->setTextColor(lv_color_hex(0x00FF88));  // Reset text color
+        _networkListLabel->setSize(300, 50);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
+        _networkListLabel->setBgColor(lv_color_hex(0x001a00));  // Reset network list bg
+        _networkListLabel->setTextColor(lv_color_hex(0x88FF88));  // Reset network list text
+        
+        // 3-line format for no networks state
         int progress = gotchi::getXPProgress(stats.xp, stats.level);
-        snprintf(statsText, sizeof(statsText), "Nets:0|Scanning...|Lv:%d %d%%|CH%d|%s%d HS|%s",
-                 (int)stats.level, progress,
-                 stats.currentChannel, hsIcon, hsCount, gpsDisplay);
+        snprintf(statsText, sizeof(statsText), 
+                 "Nets:0 Ch%d Scanning\n"       // Line 1
+                 "Lv:%d XP:%d %d%%\n"           // Line 2
+                 "HS:%d GPS:%s",               // Line 3
+                 stats.currentChannel,
+                 (int)stats.level, (int)stats.xp, progress,
+                 hsCount, gpsDisplay);
     }
     _statsLabel->setText(statsText);
     
-    // Announce new networks found in SNIFF mode
-    if (_currentMode == gotchi::Mode::SNIFF && networks.size() > _lastNetworkCount) {
+    // Announce new networks found in HUNT mode
+    if (_currentMode == gotchi::Mode::HUNT && networks.size() > _lastNetworkCount) {
         _lastNetworkCount = networks.size();
         
         const char* latestSSID = networks.back().ssid;
@@ -640,8 +975,8 @@ void AppGotchi::renderUI() {
         _neonFlashCount = 3;
     }
     
-    // Announce new BLE devices found in BLE_SNIFF mode
-    if (_currentMode == gotchi::Mode::BLE_SNIFF) {
+    // Announce new BLE devices found in BLE_SCAN mode
+    if (_currentMode == gotchi::Mode::BLE_SCAN) {
         auto devices = gotchi::getBLEDevices();
         if (devices.size() > _lastBLEDeviceCount && devices.size() > 0) {
             _lastBLEDeviceCount = devices.size();
@@ -725,11 +1060,11 @@ void AppGotchi::renderUI() {
             }
         }
         if (networks.empty()) {
-            snprintf(scoutText, sizeof(scoutText), "No networks found.\nTry SNIFF mode first.");
+            snprintf(scoutText, sizeof(scoutText), "No networks found.\nTry HUNT mode first.");
         }
         _networkListLabel->setText(scoutText);
-    } else if (_currentMode == gotchi::Mode::BLE_SNIFF) {
-        // BLE_SNIFF - show discovered BLE devices
+    } else if (_currentMode == gotchi::Mode::BLE_SCAN) {
+        // BLE_SCAN - show discovered BLE devices
         auto devices = gotchi::getBLEDevices();
         char bleText[512] = "";
         size_t blePos = 0;
@@ -750,6 +1085,62 @@ void AppGotchi::renderUI() {
             snprintf(bleText, sizeof(bleText), "No BLE devices found.\nScanning for nearby Bluetooth...");
         }
         _networkListLabel->setText(bleText);
+    } else if (_currentMode == gotchi::Mode::STATS) {
+        // STATS mode - full detailed stats page (check BEFORE networks)
+        _networkListLabel->setSize(320, 185);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_MID, 0, -5);
+        _networkListLabel->setBgColor(lv_color_hex(0x220033));  // Dark purple
+        _networkListLabel->setTextColor(lv_color_hex(0xFF88FF));
+        
+        // Build comprehensive stats display
+        char statsDetails[500];
+        
+        // Get achievement bitmask to show which are unlocked
+        uint32_t achMask = gotchi::getAchievementsBitmask();
+        
+        // Get daily challenge
+        gotchi::ChallengeInfo dailyChallenge;
+        bool hasDaily = gotchi::getDailyChallenge(dailyChallenge);
+        
+        // Format: Networks, Handshakes, Prestige
+        // Achievement list (abbreviated: N=Network, K=Key, T=Time, M=Mode)
+        snprintf(statsDetails, sizeof(statsDetails),
+            "--- STATS ---\n"
+            "Nets:%u HS:%u P:%u\n"
+            "--- DAILY ---\n"
+            "%s\n"
+            "+%dXP\n"
+            "--- ACHIEVEMENTS ---\n"
+            "N:%c%c%c%c%c K:%c%c%c%c T:%c%c%c M:%c%c%c%c B:%c%c",
+            (unsigned)stats.networksFound,
+            (unsigned)stats.handshakesCaptured,
+            (unsigned)stats.prestige,
+            hasDaily ? dailyChallenge.name : "None",
+            (int)dailyChallenge.xpReward,
+            // Network achievements (0-4)
+            (achMask & (1<<0)) ? '1' : '.',
+            (achMask & (1<<1)) ? '1' : '.',
+            (achMask & (1<<2)) ? '2' : '.',
+            (achMask & (1<<3)) ? '5' : '.',
+            (achMask & (1<<4)) ? 'X' : '.',
+            // Key/Handshake achievements (5-8)
+            (achMask & (1<<5)) ? '1' : '.',
+            (achMask & (1<<6)) ? '5' : '.',
+            (achMask & (1<<7)) ? 'X' : '.',
+            (achMask & (1<<8)) ? 'X' : '.',
+            // Time achievements (9-11)
+            (achMask & (1<<9)) ? '1' : '.',
+            (achMask & (1<<10)) ? '2' : '.',
+            (achMask & (1<<11)) ? '7' : '.',
+            // Mode achievements (12-15)
+            (achMask & (1<<12)) ? 'S' : '.',
+            (achMask & (1<<13)) ? 'C' : '.',
+            (achMask & (1<<14)) ? 'W' : '.',
+            (achMask & (1<<15)) ? 'B' : '.',
+            // Special achievements (16-17)
+            (achMask & (1<<16)) ? 'H' : '.',
+            (achMask & (1<<17)) ? 'B' : '.');
+        _networkListLabel->setText(statsDetails);
     } else if (networks.size() > 0) {
         char networkList[256] = "";
         size_t listPos = 0;
@@ -769,10 +1160,10 @@ void AppGotchi::renderUI() {
         _networkListLabel->setText("[W] Scanning for networks...");
     }
     
-    // Idle dialogue - random quirky phrases in all active modes
-    if (_currentMode == gotchi::Mode::SNIFF || _currentMode == gotchi::Mode::SCOUT ||
+    // Idle dialogue - random quirky phrases in all active modes (except ROGUE)
+    if (_currentMode == gotchi::Mode::HUNT || _currentMode == gotchi::Mode::SCOUT ||
         _currentMode == gotchi::Mode::WARDIVE || _currentMode == gotchi::Mode::SPECTRUM ||
-        _currentMode == gotchi::Mode::BLE_SNIFF) {
+        _currentMode == gotchi::Mode::BLE_SCAN) {
         uint32_t now = GetHAL().millis();
         if (now - _lastIdleSpeak > 5000 && _idleDialogue.shouldSpeak(now)) {
             _lastIdleSpeak = now;
@@ -785,10 +1176,10 @@ void AppGotchi::renderUI() {
     }
     
     // Update last count when leaving sniff mode
-    if (_currentMode != gotchi::Mode::SNIFF) {
+    if (_currentMode != gotchi::Mode::HUNT) {
         _lastNetworkCount = 0;
     }
-    if (_currentMode != gotchi::Mode::BLE_SNIFF) {
+    if (_currentMode != gotchi::Mode::BLE_SCAN) {
         _lastBLEDeviceCount = 0;
     }
     

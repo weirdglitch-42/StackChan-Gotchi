@@ -4,9 +4,11 @@
  */
 #include "storage.h"
 #include "gotchi.h"
+#include <ArduinoJson.hpp>
 #include <esp_log.h>
 #include <stdio.h>
 #include <string.h>
+#include <string>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -147,7 +149,7 @@ bool loadConfig(GotchiConfig& config) {
     if (!_sdAvailable) return false;
     
     char path[128];
-    snprintf(path, sizeof(path), "%s/config/gotchi.conf", MOUNT_POINT);
+    snprintf(path, sizeof(path), "%s/config.json", MOUNT_POINT);
     
     FILE* f = fopen(path, "r");
     if (!f) {
@@ -155,23 +157,77 @@ bool loadConfig(GotchiConfig& config) {
         return false;
     }
     
-    if (fgets(config.wigleApiKey, sizeof(config.wigleApiKey), f)) {
-        config.wigleApiKey[strcspn(config.wigleApiKey, "\r\n")] = 0;
-    }
-    if (fgets(config.wigleUsername, sizeof(config.wigleUsername), f)) {
-        config.wigleUsername[strcspn(config.wigleUsername, "\r\n")] = 0;
-    }
-    if (fgets(config.wpasecKey, sizeof(config.wpasecKey), f)) {
-        config.wpasecKey[strcspn(config.wpasecKey, "\r\n")] = 0;
+    // Read file content
+    fseek(f, 0, SEEK_END);
+    long fileSize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    char* jsonBuffer = (char*)malloc(fileSize + 1);
+    if (!jsonBuffer) {
+        fclose(f);
+        return false;
     }
     
-    char line[32];
-    if (fgets(line, sizeof(line), f)) config.autoWigleUpload = (bool)atoi(line);
-    if (fgets(line, sizeof(line), f)) config.autoWpasecUpload = (bool)atoi(line);
-    if (fgets(line, sizeof(line), f)) config.logRotationDays = atoi(line);
-    if (fgets(line, sizeof(line), f)) config.maxNetworks = atoi(line);
-    
+    size_t bytesRead = fread(jsonBuffer, 1, fileSize, f);
+    jsonBuffer[bytesRead] = '\0';
     fclose(f);
+    
+    // Parse JSON
+    ArduinoJson::JsonDocument doc;
+    ArduinoJson::DeserializationError error = ArduinoJson::deserializeJson(doc, jsonBuffer);
+    free(jsonBuffer);
+    
+    if (error) {
+        ESP_LOGW(TAG, "Config JSON parse failed: %s", error.c_str());
+        return false;
+    }
+    
+    // Load values with defaults
+    if (doc["defaultMode"].is<const char*>()) {
+        strncpy(config.defaultMode, doc["defaultMode"].as<const char*>(), 15);
+        config.defaultMode[15] = '\0';
+    }
+    if (doc["neonBrightness"].is<int>()) {
+        config.neonBrightness = doc["neonBrightness"].as<int>();
+    }
+    if (doc["headSpeed"].is<int>()) {
+        config.headSpeed = doc["headSpeed"].as<int>();
+    }
+    if (doc["autoRotateModes"].is<bool>()) {
+        config.autoRotateModes = doc["autoRotateModes"].as<bool>();
+    }
+    if (doc["audioEnabled"].is<bool>()) {
+        config.audioEnabled = doc["audioEnabled"].as<bool>();
+    }
+    if (doc["wigleApiKey"].is<const char*>()) {
+        strncpy(config.wigleApiKey, doc["wigleApiKey"].as<const char*>(), 127);
+        config.wigleApiKey[127] = '\0';
+    }
+    if (doc["wigleUsername"].is<const char*>()) {
+        strncpy(config.wigleUsername, doc["wigleUsername"].as<const char*>(), 63);
+        config.wigleUsername[63] = '\0';
+    }
+    if (doc["wpasecKey"].is<const char*>()) {
+        strncpy(config.wpasecKey, doc["wpasecKey"].as<const char*>(), 127);
+        config.wpasecKey[127] = '\0';
+    }
+    if (doc["autoWigleUpload"].is<bool>()) {
+        config.autoWigleUpload = doc["autoWigleUpload"].as<bool>();
+    }
+    if (doc["autoWpasecUpload"].is<bool>()) {
+        config.autoWpasecUpload = doc["autoWpasecUpload"].as<bool>();
+    }
+    if (doc["logRotationDays"].is<int>()) {
+        config.logRotationDays = doc["logRotationDays"].as<int>();
+    }
+    if (doc["maxNetworks"].is<int>()) {
+        config.maxNetworks = doc["maxNetworks"].as<int>();
+    }
+    if (doc["huntDisclaimerShown"].is<bool>()) {
+        config.huntDisclaimerShown = doc["huntDisclaimerShown"].as<bool>();
+    }
+    
+    ESP_LOGI(TAG, "Config loaded from JSON");
     return true;
 }
 
@@ -179,24 +235,38 @@ bool saveConfig(const GotchiConfig& config) {
     if (!_sdAvailable) return false;
     
     char dir_path[128];
-    snprintf(dir_path, sizeof(dir_path), "%s/config", MOUNT_POINT);
+    snprintf(dir_path, sizeof(dir_path), "%s", MOUNT_POINT);
     mkdir_recursive(dir_path);
     
     char path[128];
-    snprintf(path, sizeof(path), "%s/config/gotchi.conf", MOUNT_POINT);
+    snprintf(path, sizeof(path), "%s/config.json", MOUNT_POINT);
+    
+    ArduinoJson::JsonDocument doc;
+    doc["defaultMode"] = config.defaultMode;
+    doc["neonBrightness"] = config.neonBrightness;
+    doc["headSpeed"] = config.headSpeed;
+    doc["autoRotateModes"] = config.autoRotateModes;
+    doc["audioEnabled"] = config.audioEnabled;
+    doc["wigleApiKey"] = config.wigleApiKey;
+    doc["wigleUsername"] = config.wigleUsername;
+    doc["wpasecKey"] = config.wpasecKey;
+    doc["autoWigleUpload"] = config.autoWigleUpload;
+    doc["autoWpasecUpload"] = config.autoWpasecUpload;
+    doc["logRotationDays"] = config.logRotationDays;
+    doc["maxNetworks"] = config.maxNetworks;
+    doc["huntDisclaimerShown"] = config.huntDisclaimerShown;
+    
+    // Serialize to string first, then write to file
+    std::string jsonStr;
+    ArduinoJson::serializeJson(doc, jsonStr);
     
     FILE* f = fopen(path, "w");
     if (!f) return false;
     
-    fprintf(f, "%s\n", config.wigleApiKey);
-    fprintf(f, "%s\n", config.wigleUsername);
-    fprintf(f, "%s\n", config.wpasecKey);
-    fprintf(f, "%d\n", config.autoWigleUpload);
-    fprintf(f, "%d\n", config.autoWpasecUpload);
-    fprintf(f, "%d\n", config.logRotationDays);
-    fprintf(f, "%d\n", config.maxNetworks);
-    
+    fprintf(f, "%s", jsonStr.c_str());
     fclose(f);
+    
+    ESP_LOGI(TAG, "Config saved to JSON");
     return true;
 }
 

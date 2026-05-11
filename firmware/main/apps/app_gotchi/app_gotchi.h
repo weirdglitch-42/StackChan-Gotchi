@@ -29,6 +29,7 @@ private:
     void updateHeadAnimation();
     void updateNeonLights();
     void cycleMode();
+    void cycleModeBackward();
     void renderUI();
 
     std::mutex _mutex;
@@ -37,6 +38,8 @@ private:
     uint32_t _lastHeadAnim = 0;
     uint32_t _lastModeChange = 0;
     uint32_t _pressStartTime = 0;
+    int _pressX = 0;
+    int _pressY = 0;
     
     gotchi::Mode _currentMode = gotchi::Mode::IDLE;
     gotchi::Mode _lastLoggedMode = gotchi::Mode::IDLE;

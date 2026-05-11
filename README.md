@@ -36,18 +36,22 @@ A **pwnagotchi-style WiFi/BLE reconnaissance companion** for M5Stack CoreS3 robo
 ### Modes
 | Mode | Description | Neon Color |
 |------|-------------|------------|
-| **SNIFF** | Active WiFi monitoring, capture handshakes | Green/Cyan |
+| **IDLE** | Idle mode | Green |
 | **SCOUT** | Passive scanning, no transmission | Blue |
+| **HUNT** | Active WiFi monitoring, capture handshakes + deauth | Green/Cyan |
 | **WARDIVE** | Active wardriving with GPS logging | Orange |
 | **SPECTRUM** | Channel analysis | Rainbow |
-| **BLE-SNIFF** | BLE device scanning | Blue/Purple |
-| **IDLE** | Idle mode | Green |
+| **BLE-SCAN** | BLE device scanning | Blue/Purple |
+| **ROGUE** | Educational beacon spam on fixed channel 6 (OWN networks only!) | Orange |
+| **CONFIG** | Web config portal (AP: StackChan-Config, visit 192.168.4.1) | Purple |
+| **STATS** | View achievements, XP, prestige | Purple/White |
 
 ### StackChan Integration
 - Dynamic avatar emotions per mode
 - Head movement speed increases with activity
 - Neon light indicators color-coded by mode
 - Touch interaction for mode cycling
+- **Touch pauses robot motion** - touch screen to pause head movement
 
 ### Additional
 - GPS support (GPS-BDS Unit on UART2)
@@ -63,8 +67,8 @@ A **pwnagotchi-style WiFi/BLE reconnaissance companion** for M5Stack CoreS3 robo
 - (Optional) GPS-BDS Unit v1.1 for wardriving
 
 ### Known Limitations
-- SD card unavailable (firmware bug affecting StackChan)
-- Internal flash storage (~2MB) used instead
+- SD card unavailable (hardware pin conflict on CoreS3 - LCD and microSD share SPI3 pins)
+- Internal flash storage (~2MB FATFS partition) used instead
 
 ---
 

@@ -250,11 +250,11 @@ const char* IdleDialogue::getModeChangePhrase(Mode mode) {
     // Map mode to index range
     int offset = 0;
     switch (mode) {
-        case Mode::SNIFF: offset = 0; break;      // 0-1
+        case Mode::HUNT: offset = 0; break;      // 0-1
         case Mode::SCOUT: offset = 2; break;       // 2-3
         case Mode::WARDIVE: offset = 4; break;    // 4-5
         case Mode::SPECTRUM: offset = 6; break;    // 6-7
-        case Mode::BLE_SNIFF: offset = 6; break;  // 6-7 (reuse SPECTRUM)
+        case Mode::BLE_SCAN: offset = 6; break;  // 6-7 (reuse SPECTRUM)
         case Mode::IDLE: offset = 8; break;        // 8-9
         default: offset = 8;
     }
