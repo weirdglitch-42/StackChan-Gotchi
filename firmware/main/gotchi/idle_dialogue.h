@@ -42,7 +42,7 @@ public:
 
 private:
     uint32_t _lastSpeakTime = 0;
-    uint32_t _cooldownMs = 4000;  // 4 seconds between idle phrases
+    uint32_t _cooldownMs = 5000;  // 5 seconds between idle phrases
     int _lastPhraseIndex = -1;
 
     const char* _getObservingPhrase();

