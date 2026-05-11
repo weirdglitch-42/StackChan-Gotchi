@@ -140,6 +140,63 @@ const IdlePhrase IdleDialogue::_modePhrases[] = {
     {"Idle mode - power saving", IdleMood::OBSERVING, 1, false},
 };
 
+// Mode-specific idle phrases - used during active scanning
+const IdlePhrase _scoutPhrases[] = {
+    {"Scanning all the things!", IdleMood::OBSERVING, 5, true},
+    {"Any networks out there?", IdleMood::OBSERVING, 4, true},
+    {"*antennas on full power*", IdleMood::OBSERVING, 6, true},
+    {"Searching for SSIDs...", IdleMood::OBSERVING, 3, false},
+    {"Who lives at this frequency?", IdleMood::CURIOUS, 5, true},
+};
+
+const IdlePhrase _huntPhrases[] = {
+    {"Hunting handshakes!", IdleMood::FOCUSED, 6, true},
+    {"Target acquisition mode!", IdleMood::FOCUSED, 5, true},
+    {"*lock on tone plays*", IdleMood::FOCUSED, 7, true},
+    {"Analyzing traffic patterns...", IdleMood::FOCUSED, 3, false},
+    {"Any vulnerable packets here?", IdleMood::FOCUSED, 4, true},
+};
+
+const IdlePhrase _wardivePhrases[] = {
+    {"Time to map the neighborhood!", IdleMood::EXCITED, 7, true},
+    {"*turns on GPS*", IdleMood::EXCITED, 5, true},
+    {"Mapping all the networks!", IdleMood::EXCITED, 6, true},
+    {"Wardrive engage!", IdleMood::EXCITED, 8, true},
+    {"Coordinates locked!", IdleMood::FOCUSED, 4, true},
+};
+
+const IdlePhrase _spectrumPhrases[] = {
+    {"Scanning RF spectrum...", IdleMood::FOCUSED, 4, false},
+    {"*tunes frequency*", IdleMood::FOCUSED, 5, true},
+    {"Finding the busy channels...", IdleMood::FOCUSED, 3, false},
+    {"Analyzing spectrum usage...", IdleMood::FOCUSED, 2, false},
+    {"Which channel is loudest?", IdleMood::CURIOUS, 4, true},
+};
+
+const IdlePhrase _bleScanPhrases[] = {
+    {"Any BLE devices nearby?", IdleMood::CURIOUS, 5, true},
+    {"*listens to Bluetooth*", IdleMood::CURIOUS, 6, true},
+    {"Discovering devices...", IdleMood::OBSERVING, 3, false},
+    {"Who's broadcasting?", IdleMood::CURIOUS, 5, true},
+    {"BLE activity detected!", IdleMood::EXCITED, 6, true},
+};
+
+const IdlePhrase _roguePhrases[] = {
+    {"*beacon spam initiated*", IdleMood::EXCITED, 8, true},
+    {"Educational mode: active!", IdleMood::EXCITED, 7, true},
+    {"Deploying honeypots!", IdleMood::EXCITED, 6, false},
+    {"*evil laugh (just kidding)*", IdleMood::EXCITED, 9, true},
+    {"Broadcasting test APs...", IdleMood::FOCUSED, 4, false},
+};
+
+const IdlePhrase _idlePhrases[] = {
+    {"*power saving mode*", IdleMood::IDLE_BOT, 1, false},
+    {"Zzz... packets... zzz", IdleMood::IDLE_BOT, 1, false},
+    {"*recharging batteries*", IdleMood::IDLE_BOT, 2, true},
+    {"Dreaming of SSIDs...", IdleMood::IDLE_BOT, 1, false},
+    {"Low power mode active", IdleMood::IDLE_BOT, 0, false},
+};
+
 IdleDialogue::IdleDialogue() {
     srand(GetHAL().millis());
 }
@@ -263,6 +320,51 @@ const char* IdleDialogue::getModeChangePhrase(Mode mode) {
     int index = offset + (rand() % 2);
     if (index >= count) index = count - 1;
     return _modePhrases[index].text;
+}
+
+const char* IdleDialogue::getModeSpecificPhrase(Mode mode) {
+    const IdlePhrase* phrases = nullptr;
+    int count = 0;
+    
+    switch (mode) {
+        case Mode::SCOUT:
+            phrases = _scoutPhrases;
+            count = sizeof(_scoutPhrases) / sizeof(_scoutPhrases[0]);
+            break;
+        case Mode::HUNT:
+            phrases = _huntPhrases;
+            count = sizeof(_huntPhrases) / sizeof(_huntPhrases[0]);
+            break;
+        case Mode::WARDIVE:
+            phrases = _wardivePhrases;
+            count = sizeof(_wardivePhrases) / sizeof(_wardivePhrases[0]);
+            break;
+        case Mode::SPECTRUM:
+            phrases = _spectrumPhrases;
+            count = sizeof(_spectrumPhrases) / sizeof(_spectrumPhrases[0]);
+            break;
+        case Mode::BLE_SCAN:
+            phrases = _bleScanPhrases;
+            count = sizeof(_bleScanPhrases) / sizeof(_bleScanPhrases[0]);
+            break;
+        case Mode::ROGUE:
+            phrases = _roguePhrases;
+            count = sizeof(_roguePhrases) / sizeof(_roguePhrases[0]);
+            break;
+        case Mode::IDLE:
+            phrases = _idlePhrases;
+            count = sizeof(_idlePhrases) / sizeof(_idlePhrases[0]);
+            break;
+        default:
+            phrases = _scoutPhrases;
+            count = sizeof(_scoutPhrases) / sizeof(_scoutPhrases[0]);
+            break;
+    }
+    
+    if (phrases && count > 0) {
+        return phrases[rand() % count].text;
+    }
+    return "beep boop";
 }
 
 }  // namespace gotchi

@@ -9,6 +9,7 @@
 #include "achievement_system.h"
 #include "web_manager.h"
 #include "mode.h"
+#include "rogue_manager.h"
 #include <esp_wifi.h>
 #include <esp_netif.h>
 #include <esp_event.h>
@@ -1046,113 +1047,17 @@ void stopBLEScan() {
     ESP_LOGI(TAG, "BLE scan stopped, found %d devices", (int)_bleDevices.size());
 }
 
-static TaskHandle_t _beaconTaskHandle = nullptr;
 static TaskHandle_t _configTaskHandle = nullptr;
 static esp_netif_t* _ap_netif_handle = nullptr;  // Shared AP netif handle for CONFIG/ROGUE modes
 
-static const char* ROGUE_SSIDS[] = {
-    "Free_WiFi", "Airport_WiFi", "Hotel_WiFi", "Coffee_Shop", "Starbucks",
-    "McDonalds", "Library_WiFi", "School_Network", "Office_Guest", "Conference",
-    "Neighbor_WiFi", "Linksys", "NETGEAR", "TP-Link", "Default",
-    "XFINITY", "ATT_WiFi", "Verizon_WiFi", "Cafe_Free", "Public_WiFi"
-};
-
-static void sendBeaconFrame(const char* ssid, const uint8_t* bssid, uint8_t channel) {
-    uint8_t beacon[128];
-    memset(beacon, 0, sizeof(beacon));
-    
-    beacon[0] = 0x80;
-    beacon[1] = 0x00;
-    beacon[2] = 0x00;
-    beacon[3] = 0x00;
-    memset(&beacon[4], 0xFF, 6);
-    memcpy(&beacon[10], bssid, 6);
-    memcpy(&beacon[16], bssid, 6);
-    beacon[18] = 0x00;
-    beacon[19] = 0x00;
-    
-    uint64_t timestamp = GetHAL().millis() * 1000;
-    for (int i = 0; i < 8; i++) {
-        beacon[20 + i] = (timestamp >> (i * 8)) & 0xFF;
-    }
-    beacon[28] = 0x64;
-    beacon[29] = 0x00;
-    beacon[30] = 0x01;
-    beacon[31] = 0x01;
-    
-    int pos = 32;
-    beacon[pos++] = 0x00;
-    beacon[pos++] = strlen(ssid);
-    memcpy(&beacon[pos], ssid, strlen(ssid));
-    pos += strlen(ssid);
-    
-    beacon[pos++] = 0x01;
-    beacon[pos++] = 4;
-    beacon[pos++] = 0x82;
-    beacon[pos++] = 0x84;
-    beacon[pos++] = 0x8B;
-    beacon[pos++] = 0x96;
-    
-    beacon[pos++] = 0x03;
-    beacon[pos++] = 1;
-    beacon[pos++] = channel;
-    
-    esp_wifi_80211_tx(WIFI_IF_AP, beacon, pos, false);
-}
-
-static void beaconTask(void* param) {
-    (void)param;
-    ESP_LOGI(TAG, "Beacon spam task started");
-    
-    uint32_t beaconCount = 0;
-    uint32_t lastLog = GetHAL().millis();
-    
-    uint8_t bssids[5][6];
-    for (int i = 0; i < 5; i++) {
-        bssids[i][0] = 0x00;
-        bssids[i][1] = 0x11;
-        bssids[i][2] = 0x22;
-        bssids[i][3] = 0x33;
-        bssids[i][4] = 0x44 + i;
-        bssids[i][5] = (uint8_t)(esp_random() & 0xFF);
-    }
-    
-    // Fixed channel 6 - no hopping (like PORKCHOP BACON mode)
-    uint8_t channel = 6;
-    
-    while (_beaconSpamming) {
-        // Send batch of fake AP beacons
-        for (int i = 0; i < 5 && _beaconSpamming; i++) {
-            sendBeaconFrame(ROGUE_SSIDS[(beaconCount + i) % 20], bssids[i], channel);
-            beaconCount++;
-            vTaskDelay(pdMS_TO_TICKS(100));  // 100ms between beacons (balanced rate)
-        }
-        
-        vTaskDelay(pdMS_TO_TICKS(200));
-        
-        if (GetHAL().millis() - lastLog > 5000) {
-            ESP_LOGI(TAG, "Beacons sent: %u on CH%d", beaconCount, channel);
-            lastLog = GetHAL().millis();
-        }
-    }
-    
-    ESP_LOGI(TAG, "Beacon spam stopped, sent %u frames", beaconCount);
-    _beaconSpamming = false;
-    vTaskDelete(NULL);
-}
-
 void startRogue() {
-    if (_beaconSpamming) return;
-    
     ESP_LOGI(TAG, "Starting ROGUE mode - beacon spam");
     ESP_LOGW(TAG, "WARNING: Educational use only!");
     
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(200));
     
-    // Only init if not already done - handle case where event loop exists
     static bool netif_initialized = false;
-    static bool ap_netif_created = false;
     
     if (!netif_initialized) {
         esp_err_t err = esp_netif_init();
@@ -1168,24 +1073,19 @@ void startRogue() {
         netif_initialized = true;
     }
     
-    // Try to get existing AP netif first (handles case from CONFIG mode or previous ROGUE run)
     if (!_ap_netif_handle) {
         _ap_netif_handle = esp_netif_get_default_netif();
     }
     
-    // If still no handle, try to create one
     if (!_ap_netif_handle) {
         _ap_netif_handle = esp_netif_create_default_wifi_ap();
         if (_ap_netif_handle) {
-            ap_netif_created = true;
             ESP_LOGI(TAG, "AP netif created");
         }
     } else {
         ESP_LOGI(TAG, "Using existing AP netif");
-        ap_netif_created = true;
     }
     
-    // Re-init WiFi to ensure clean state
     esp_wifi_deinit();
     vTaskDelay(pdMS_TO_TICKS(100));
     
@@ -1204,10 +1104,23 @@ void startRogue() {
     }
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    // Set channel 6 (standard, less congested)
     ret = esp_wifi_set_channel(6, WIFI_SECOND_CHAN_NONE);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "WiFi channel set failed: %d", ret);
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    wifi_config_t ap_config = {0};
+    ap_config.ap.ssid_len = 0;
+    ap_config.ap.channel = 6;
+    ap_config.ap.authmode = WIFI_AUTH_OPEN;
+    ap_config.ap.max_connection = 0;
+    ap_config.ap.beacon_interval = 100;
+    strcpy((char*)ap_config.ap.ssid, " ");
+    ap_config.ap.ssid[0] = 0;
+    ret = esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "AP config cleared: %d", ret);
     }
     vTaskDelay(pdMS_TO_TICKS(100));
     
@@ -1219,8 +1132,20 @@ void startRogue() {
     vTaskDelay(pdMS_TO_TICKS(500));
     
     _wifiInitialized = true;
+    
+    RogueManager& rogue = getRogueManager();
+    rogue.loadFromNVS();
+    
+    if (!rogue.getTarget().valid) {
+        auto networks = getNetworks();
+        if (!networks.empty()) {
+            rogue.autoSelectStrongest(networks);
+            ESP_LOGI(TAG, "Auto-selected strongest network for ROGUE");
+        }
+    }
+    
+    rogue.start();
     _beaconSpamming = true;
-    xTaskCreate(beaconTask, "beacon_task", 4096, NULL, 5, &_beaconTaskHandle);
     
     ESP_LOGI(TAG, "ROGUE mode active - ready to send beacons");
 }
@@ -1228,12 +1153,8 @@ void startRogue() {
 void stopRogue() {
     if (!_beaconSpamming) return;
     
+    getRogueManager().stop();
     _beaconSpamming = false;
-    
-    if (_beaconTaskHandle) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-        _beaconTaskHandle = nullptr;
-    }
     
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -1269,7 +1190,6 @@ void startConfigMode() {
     // Only init if not already done - handle case where event loop exists
     // Note: netif_initialized is shared with startRogue
     static bool netif_initialized = false;
-    static bool ap_netif_created = false;
     if (!netif_initialized) {
         esp_err_t err = esp_netif_init();
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
@@ -1293,12 +1213,10 @@ void startConfigMode() {
     if (!_ap_netif_handle) {
         _ap_netif_handle = esp_netif_create_default_wifi_ap();
         if (_ap_netif_handle) {
-            ap_netif_created = true;
             ESP_LOGI(TAG, "AP netif created for CONFIG");
         }
     } else {
         ESP_LOGI(TAG, "Using existing AP netif for CONFIG");
-        ap_netif_created = true;
     }
     
     // Re-init WiFi to ensure clean state

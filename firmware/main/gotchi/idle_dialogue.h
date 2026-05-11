@@ -36,6 +36,7 @@ public:
     const char* getBLEDeviceFoundPhrase(const char* name);
     const char* getMilestonePhrase(int level);
     const char* getModeChangePhrase(Mode mode);
+    const char* getModeSpecificPhrase(Mode mode);
 
     // Check if should speak now (with cooldown)
     bool shouldSpeak(uint32_t now);

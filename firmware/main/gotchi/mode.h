@@ -35,7 +35,13 @@ struct ModeInfo {
     Mode prevMode;
     uint32_t toneFreq;
     uint32_t headMoveIntervalMs;
+    int headYawPattern;
+    int16_t headYawRange;
+    int16_t headPitch;
     int avatarEmotion;
+    bool enableDialogue;
+    uint32_t dialogueIntervalMs;
+    int dialogueCategory;
     NeonColor defaultNeon;
     NeonColorCallback getDynamicNeon;
     ModeEnterCallback onEnter;
@@ -53,5 +59,19 @@ void onModeEnter(Mode mode);
 
 inline int getModeAvatarEmotion(Mode mode) { return getModeInfo(mode).avatarEmotion; }
 inline uint32_t getModeHeadMoveInterval(Mode mode) { return getModeInfo(mode).headMoveIntervalMs; }
+inline int16_t getModeHeadPitch(Mode mode) { return getModeInfo(mode).headPitch; }
+inline bool isDialogueEnabled(Mode mode) { return getModeInfo(mode).enableDialogue; }
+inline uint32_t getModeDialogueInterval(Mode mode) { return getModeInfo(mode).dialogueIntervalMs; }
+inline int getModeDialogueCategory(Mode mode) { return getModeInfo(mode).dialogueCategory; }
+
+inline int16_t getModeHeadYaw(Mode mode, uint32_t now, uint32_t interval) {
+    const ModeInfo& mi = getModeInfo(mode);
+    switch (mi.headYawPattern) {
+        case 1: return (now / interval) % 2 ? mi.headYawRange : -mi.headYawRange;
+        case 2: return (int16_t)((now / interval) % 6 - 3) * (mi.headYawRange / 3);
+        case 3: return (int16_t)((now / 250 % 4) - 2) * (mi.headYawRange / 3);
+        default: return 0;
+    }
+}
 
 }

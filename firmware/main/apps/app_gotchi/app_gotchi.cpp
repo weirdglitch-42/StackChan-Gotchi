@@ -357,25 +357,8 @@ void AppGotchi::updateHeadAnimation() {
     auto& motion = GetStackChan().motion();
 
     uint32_t interval = gotchi::getModeHeadMoveInterval(_currentMode);
-    int16_t baseYaw = 0;
-    int16_t basePitch = 200;
-
-    switch (_currentMode) {
-        case gotchi::Mode::SCOUT:
-            basePitch = 150;
-            break;
-        case gotchi::Mode::WARDIVE:
-            baseYaw = (now / interval) % 2 ? 300 : -300;
-            break;
-        case gotchi::Mode::SPECTRUM:
-            baseYaw = (int16_t)((now / interval) % 6 - 3) * 150;
-            break;
-        case gotchi::Mode::ROGUE:
-            baseYaw = (int16_t)((now / 250 % 4) - 2) * 120;
-            break;
-        default:
-            break;
-    }
+    int16_t baseYaw = gotchi::getModeHeadYaw(_currentMode, now, interval);
+    int16_t basePitch = gotchi::getModeHeadPitch(_currentMode);
 
     bool targetChanged = false;
 
@@ -889,15 +872,14 @@ void AppGotchi::renderUI() {
         _networkListLabel->setText("[W] Scanning for networks...");
     }
     
-    // Idle dialogue - random quirky phrases in all active modes (except ROGUE)
-    if (_currentMode == gotchi::Mode::HUNT || _currentMode == gotchi::Mode::SCOUT ||
-        _currentMode == gotchi::Mode::WARDIVE || _currentMode == gotchi::Mode::SPECTRUM ||
-        _currentMode == gotchi::Mode::BLE_SCAN) {
+    // Idle dialogue - use mode-specific phrases based on ModeInfo
+    if (gotchi::isDialogueEnabled(_currentMode)) {
+        uint32_t interval = gotchi::getModeDialogueInterval(_currentMode);
         uint32_t now = GetHAL().millis();
-        if (now - _lastIdleSpeak > 5000 && _idleDialogue.shouldSpeak(now)) {
+        if (interval > 0 && now - _lastIdleSpeak > interval && _idleDialogue.shouldSpeak(now)) {
             _lastIdleSpeak = now;
             if (GetStackChan().hasAvatar()) {
-                const char* phrase = _idleDialogue.getRandomPhrase(networks, stats.xp, stats.level, true);
+                const char* phrase = _idleDialogue.getModeSpecificPhrase(_currentMode);
                 GetStackChan().avatar().setSpeech(phrase);
                 GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(2500, 180, true));
             }

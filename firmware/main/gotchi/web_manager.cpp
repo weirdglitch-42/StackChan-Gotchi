@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include "gotchi.h"
 #include "storage.h"
+#include "rogue_manager.h"
 
 static const char* TAG = "gotchi_web";
 
@@ -38,6 +39,8 @@ void WebManager::start() {
     httpd_uri_t apiConfigPostUri = {"/api/config", HTTP_POST, apiConfigHandler, nullptr};
     httpd_uri_t apiStatsUri = {"/api/stats", HTTP_GET, apiStatsHandler, nullptr};
     httpd_uri_t apiRogueUri = {"/api/rogue", HTTP_POST, apiRogueHandler, nullptr};
+    httpd_uri_t apiRogueNetworksUri = {"/api/rogue/networks", HTTP_GET, apiRogueNetworksHandler, nullptr};
+    httpd_uri_t apiRogueSetUri = {"/api/rogue/set", HTTP_POST, apiRogueSetTargetHandler, nullptr};
     httpd_uri_t apiFilesUri = {"/api/files", HTTP_GET, apiFilesHandler, nullptr};
     httpd_uri_t apiWigleUri = {"/api/wigle", HTTP_POST, apiWigleHandler, nullptr};
     httpd_uri_t apiPwnUri = {"/api/pwnagotchi", HTTP_POST, apiPwnagotchiHandler, nullptr};
@@ -48,6 +51,8 @@ void WebManager::start() {
         httpd_register_uri_handler(_server, &apiConfigPostUri);
         httpd_register_uri_handler(_server, &apiStatsUri);
         httpd_register_uri_handler(_server, &apiRogueUri);
+        httpd_register_uri_handler(_server, &apiRogueNetworksUri);
+        httpd_register_uri_handler(_server, &apiRogueSetUri);
         httpd_register_uri_handler(_server, &apiFilesUri);
         httpd_register_uri_handler(_server, &apiWigleUri);
         httpd_register_uri_handler(_server, &apiPwnUri);
@@ -135,6 +140,13 @@ th{color:#00ff88}
     <button class='danger' onclick='stopRogue()'>Stop Rogue Mode</button>
     <button class='secondary' onclick='restartAP()'>Restart AP</button>
   </div>
+  <div class='card'>
+    <p><strong>Rogue Target Network</strong></p>
+    <select id='rogueNetwork'><option value=''>-- Select Network --</option></select>
+    <button onclick='loadRogueNetworks()'>Load Networks</button>
+    <button onclick='setRogueTarget()'>Set Target</button>
+    <p><small>Select from discovered networks to target in ROGUE mode</small></p>
+  </div>
 </div>
 
 <div id='pageStats' class='page'>
@@ -191,6 +203,18 @@ function saveConfig(){
   .catch(function(e){showMessage('Error: '+e,true)});
 }
 function stopRogue(){fetch('/api/rogue',{method:'POST'}).then(function(){showMessage('Rogue stopped',false)}).catch(function(){});}
+function loadRogueNetworks(){fetch('/api/rogue/networks').then(function(r){return r.json()}).then(function(d){
+  var sel=document.getElementById('rogueNetwork');sel.innerHTML='<option value="">-- Select Network --</option>';
+  d.networks.forEach(function(n){var opt=document.createElement('option');
+    opt.value=n.ssid+'|'+n.bssid+'|'+n.channel;opt.textContent=n.ssid+' (CH'+n.channel+', '+n.rssi+'dBm)';
+    sel.appendChild(opt);});
+  showMessage('Loaded '+d.networks.length+' networks',false);
+}).catch(function(e){showMessage('Failed to load networks',true);});}
+function setRogueTarget(){var sel=document.getElementById('rogueNetwork');var v=sel.value;
+  if(!v){showMessage('Select a network first',true);return;}
+  var parts=v.split('|');var params='ssid='+encodeURIComponent(parts[0])+'&bssid='+parts[1]+'&channel='+parts[2];
+  fetch('/api/rogue/set',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:params})
+  .then(function(r){return r.json()}).then(function(d){showMessage('Target: '+d.ssid+' CH'+d.channel,false);}).catch(function(e){showMessage('Failed to set target',true);});}
 function restartAP(){location.reload();}
 function updateStats(){
   fetch('/api/stats').then(function(r){return r.json()}).then(function(d){
@@ -323,11 +347,83 @@ esp_err_t WebManager::apiStatsHandler(httpd_req_t* req) {
 }
 
 esp_err_t WebManager::apiRogueHandler(httpd_req_t* req) {
-    // Stop rogue mode
-    stopRogue();
+    if (req->method == HTTP_POST) {
+        stopRogue();
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"status\":\"stopped\"}", 18);
+    }
+    return ESP_OK;
+}
+
+esp_err_t WebManager::apiRogueNetworksHandler(httpd_req_t* req) {
+    auto networks = getNetworks();
+    char json[2048];
+    int offset = 0;
+    
+    offset += snprintf(json + offset, sizeof(json) - offset, "{\"networks\":[");
+    
+    for (size_t i = 0; i < networks.size() && i < 20; i++) {
+        const auto& net = networks[i];
+        char bssid[18];
+        snprintf(bssid, sizeof(bssid), "%02X:%02X:%02X:%02X:%02X:%02X",
+            net.bssid[0], net.bssid[1], net.bssid[2],
+            net.bssid[3], net.bssid[4], net.bssid[5]);
+        
+        offset += snprintf(json + offset, sizeof(json) - offset,
+            "%s{\"ssid\":\"%s\",\"bssid\":\"%s\",\"channel\":%d,\"rssi\":%d}",
+            (i > 0) ? "," : "",
+            net.ssid[0] ? net.ssid : "(hidden)",
+            bssid, net.channel, net.rssi);
+    }
+    
+    offset += snprintf(json + offset, sizeof(json) - offset, "],\"count\":%zu}", networks.size());
     
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"status\":\"stopped\"}", 18);
+    httpd_resp_send(req, json, strlen(json));
+    return ESP_OK;
+}
+
+esp_err_t WebManager::apiRogueSetTargetHandler(httpd_req_t* req) {
+    char content[256];
+    int ret = httpd_req_recv(req, content, sizeof(content) - 1);
+    if (ret <= 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_send(req, "{\"error\":\"no_data\"}", 17);
+        return ESP_FAIL;
+    }
+    content[ret] = '\0';
+    
+    char ssid[33] = {0};
+    char bssidStr[18] = {0};
+    uint8_t channel = 6;
+    
+    char* p = content;
+    while (*p) {
+        if (strncmp(p, "ssid=", 5) == 0) {
+            strncpy(ssid, p + 5, sizeof(ssid) - 1);
+        } else if (strncmp(p, "bssid=", 6) == 0) {
+            strncpy(bssidStr, p + 6, sizeof(bssidStr) - 1);
+        } else if (strncmp(p, "channel=", 8) == 0) {
+            channel = atoi(p + 8);
+        }
+        while (*p && *p != '&') p++;
+        if (*p == '&') p++;
+    }
+    
+    uint8_t bssid[6] = {0};
+    if (strlen(bssidStr) == 17) {
+        sscanf(bssidStr, "%02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX",
+            &bssid[0], &bssid[1], &bssid[2], &bssid[3], &bssid[4], &bssid[5]);
+    }
+    
+    RogueManager& rogue = getRogueManager();
+    rogue.setTargetNetwork(ssid, bssid, channel);
+    rogue.saveToNVS();
+    
+    char json[128];
+    snprintf(json, sizeof(json), "{\"status\":\"ok\",\"ssid\":\"%s\",\"channel\":%d}", ssid, channel);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json, strlen(json));
     return ESP_OK;
 }
 

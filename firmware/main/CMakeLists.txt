@@ -18,6 +18,7 @@ file(GLOB_RECURSE STACK_CHAN_SOURCES
     "gotchi/*.cc"
     "gotchi/*.cpp"
     "gotchi/mode.cpp"
+    "gotchi/rogue_manager.cpp"
 )
 set(STACK_CHAN_INCLUDE_DIRS 
     "."
