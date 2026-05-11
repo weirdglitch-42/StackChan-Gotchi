@@ -27,6 +27,8 @@ struct GotchiConfig {
     int logRotationDays;
     int maxNetworks;
     bool huntDisclaimerShown;
+    bool huntEnabled;
+    bool rogueEnabled;
     
     GotchiConfig() {
         strcpy(defaultMode, "SCOUT");
@@ -42,6 +44,8 @@ struct GotchiConfig {
         logRotationDays = 7;
         maxNetworks = MAX_STORED_NETWORKS;
         huntDisclaimerShown = false;
+        huntEnabled = false;
+        rogueEnabled = false;
     }
 };
 

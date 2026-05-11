@@ -44,6 +44,7 @@ void WebManager::start() {
     httpd_uri_t apiFilesUri = {"/api/files", HTTP_GET, apiFilesHandler, nullptr};
     httpd_uri_t apiWigleUri = {"/api/wigle", HTTP_POST, apiWigleHandler, nullptr};
     httpd_uri_t apiPwnUri = {"/api/pwnagotchi", HTTP_POST, apiPwnagotchiHandler, nullptr};
+    httpd_uri_t apiPermissionsUri = {"/api/permissions", HTTP_POST, apiPermissionsHandler, nullptr};
 
     if (httpd_start(&_server, &config) == ESP_OK) {
         httpd_register_uri_handler(_server, &rootUri);
@@ -56,6 +57,7 @@ void WebManager::start() {
         httpd_register_uri_handler(_server, &apiFilesUri);
         httpd_register_uri_handler(_server, &apiWigleUri);
         httpd_register_uri_handler(_server, &apiPwnUri);
+        httpd_register_uri_handler(_server, &apiPermissionsUri);
         ESP_LOGI(TAG, "HTTP server started");
     } else {
         ESP_LOGW(TAG, "HTTP server failed to start");
@@ -134,6 +136,12 @@ th{color:#00ff88}
       <option value='STATS'>STATS - Statistics</option>
     </select>
     <button onclick='saveConfig()'>Apply Mode</button>
+  </div>
+  <div class='card'>
+    <p><strong>Mode Permissions</strong></p>
+    <label><input type='checkbox' id='huntEnabled'> Enable HUNT Mode</label><br>
+    <label><input type='checkbox' id='rogueEnabled'> Enable ROGUE Mode</label>
+    <button onclick='saveModePermissions()'>Save Permissions</button>
   </div>
   <div class='card'>
     <p><strong>Quick Actions</strong></p>
@@ -216,6 +224,14 @@ function setRogueTarget(){var sel=document.getElementById('rogueNetwork');var v=
   fetch('/api/rogue/set',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:params})
   .then(function(r){return r.json()}).then(function(d){showMessage('Target: '+d.ssid+' CH'+d.channel,false);}).catch(function(e){showMessage('Failed to set target',true);});}
 function restartAP(){location.reload();}
+function saveModePermissions(){
+  var huntEnabled=document.getElementById('huntEnabled').checked;
+  var rogueEnabled=document.getElementById('rogueEnabled').checked;
+  fetch('/api/permissions',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({huntEnabled:huntEnabled,rogueEnabled:rogueEnabled})})
+  .then(function(r){return r.json()}).then(function(d){showMessage('Permissions saved',false);})
+  .catch(function(e){showMessage('Error: '+e,true);});
+}
 function updateStats(){
   fetch('/api/stats').then(function(r){return r.json()}).then(function(d){
     document.getElementById('currentMode').textContent=d.mode;
@@ -300,11 +316,11 @@ esp_err_t WebManager::apiConfigHandler(httpd_req_t* req) {
         
         Mode m = Mode::IDLE;
         if (strcmp(modeStr, "SCOUT") == 0) m = Mode::SCOUT;
-        else if (strcmp(modeStr, "HUNT") == 0) m = Mode::HUNT;
+        else if (strcmp(modeStr, "HUNT") == 0 && isHuntEnabled()) m = Mode::HUNT;
         else if (strcmp(modeStr, "WARDIVE") == 0) m = Mode::WARDIVE;
         else if (strcmp(modeStr, "SPECTRUM") == 0) m = Mode::SPECTRUM;
         else if (strcmp(modeStr, "BLE_SCAN") == 0) m = Mode::BLE_SCAN;
-        else if (strcmp(modeStr, "ROGUE") == 0) m = Mode::ROGUE;
+        else if (strcmp(modeStr, "ROGUE") == 0 && isRogueEnabled()) m = Mode::ROGUE;
         else if (strcmp(modeStr, "STATS") == 0) m = Mode::STATS;
         else if (strcmp(modeStr, "CONFIG") == 0) m = Mode::CONFIG;
         
@@ -446,6 +462,34 @@ esp_err_t WebManager::apiWigleHandler(httpd_req_t* req) {
 esp_err_t WebManager::apiPwnagotchiHandler(httpd_req_t* req) {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"status\":\"not_implemented\"}", 26);
+    return ESP_OK;
+}
+
+esp_err_t WebManager::apiPermissionsHandler(httpd_req_t* req) {
+    char content[256];
+    int ret = httpd_req_recv(req, content, sizeof(content) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    content[ret] = '\0';
+    
+    bool huntEnabled = false;
+    bool rogueEnabled = false;
+    
+    if (strstr(content, "\"huntEnabled\":true") != nullptr || strstr(content, "\"huntEnabled\": true") != nullptr) {
+        huntEnabled = true;
+    }
+    if (strstr(content, "\"rogueEnabled\":true") != nullptr || strstr(content, "\"rogueEnabled\": true") != nullptr) {
+        rogueEnabled = true;
+    }
+    
+    GotchiConfig cfg = gotchi::getConfig();
+    cfg.huntEnabled = huntEnabled;
+    cfg.rogueEnabled = rogueEnabled;
+    gotchi::saveConfig(cfg);
+    
+    ESP_LOGI(TAG, "Permissions saved: hunt=%d, rogue=%d", huntEnabled, rogueEnabled);
+    
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"status\":\"ok\"}", 16);
     return ESP_OK;
 }
 

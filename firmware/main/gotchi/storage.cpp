@@ -226,6 +226,12 @@ bool loadConfig(GotchiConfig& config) {
     if (doc["huntDisclaimerShown"].is<bool>()) {
         config.huntDisclaimerShown = doc["huntDisclaimerShown"].as<bool>();
     }
+    if (doc["huntEnabled"].is<bool>()) {
+        config.huntEnabled = doc["huntEnabled"].as<bool>();
+    }
+    if (doc["rogueEnabled"].is<bool>()) {
+        config.rogueEnabled = doc["rogueEnabled"].as<bool>();
+    }
     
     ESP_LOGI(TAG, "Config loaded from JSON");
     return true;
@@ -255,6 +261,8 @@ bool saveConfig(const GotchiConfig& config) {
     doc["logRotationDays"] = config.logRotationDays;
     doc["maxNetworks"] = config.maxNetworks;
     doc["huntDisclaimerShown"] = config.huntDisclaimerShown;
+    doc["huntEnabled"] = config.huntEnabled;
+    doc["rogueEnabled"] = config.rogueEnabled;
     
     // Serialize to string first, then write to file
     std::string jsonStr;

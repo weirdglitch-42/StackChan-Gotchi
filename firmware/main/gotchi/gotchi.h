@@ -192,5 +192,7 @@ bool isDeepThoughtUnlocked();
 uint8_t getPrestige();
 bool shouldShowHuntDisclaimer();
 void acknowledgeHuntDisclaimer();
+bool isHuntEnabled();
+bool isRogueEnabled();
 
 }

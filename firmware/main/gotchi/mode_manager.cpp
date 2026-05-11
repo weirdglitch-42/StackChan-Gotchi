@@ -58,6 +58,15 @@ void ModeManager::deinitWiFi() {
 void ModeManager::setMode(Mode mode) {
     if (_currentMode == mode) return;
     
+    if (mode == Mode::HUNT && !gotchi::isHuntEnabled()) {
+        ESP_LOGW(TAG, "HUNT mode is disabled in config");
+        return;
+    }
+    if (mode == Mode::ROGUE && !gotchi::isRogueEnabled()) {
+        ESP_LOGW(TAG, "ROGUE mode is disabled in config");
+        return;
+    }
+    
     ESP_LOGI(TAG, "Switching from %s to %s", 
              getModeName(_currentMode), getModeName(mode));
     

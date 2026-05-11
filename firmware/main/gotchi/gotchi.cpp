@@ -320,6 +320,14 @@ void acknowledgeHuntDisclaimer() {
     _huntDisclaimerShown = true;
 }
 
+bool isHuntEnabled() {
+    return getConfig().huntEnabled;
+}
+
+bool isRogueEnabled() {
+    return getConfig().rogueEnabled;
+}
+
 uint32_t getAchievementsBitmask() {
     return getAchievementSystem().getAchievementsBitmask();
 }

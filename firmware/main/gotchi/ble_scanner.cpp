@@ -110,8 +110,12 @@ static int ble_gap_event_cb(ble_gap_event* event, void* arg) {
                 if (nameLen > 32) nameLen = 32;
                 memcpy(device.name, &desc->data[i + 2], nameLen);
                 device.name[nameLen] = '\0';
-                hasName = true;
-                break;
+                bool validName = true;
+                for (int j = 0; j < nameLen; j++) {
+                    unsigned char c = device.name[j];
+                    if (c < 32 || c > 126) { validName = false; break; }
+                }
+                if (validName) { hasName = true; break; }
             }
         }
         

@@ -62,7 +62,7 @@ void AppGotchi::onOpen() {
     _statsLabel->setTextColor(lv_color_hex(0x00FF88));
     _statsLabel->setTextAlign(LV_TEXT_ALIGN_LEFT);
     _statsLabel->setSize(300, 75);  // Taller for 3-line display
-    _statsLabel->align(LV_ALIGN_TOP_LEFT, 5, 5);
+    _statsLabel->align(LV_ALIGN_TOP_LEFT, 5, 10);
     _statsLabel->setText("Nets:0 XP:0 Lvl:1 | Scanning...");
 
     // Network list display (bottom of screen)
@@ -268,7 +268,13 @@ void AppGotchi::handleInput() {
 }
 
 void AppGotchi::cycleMode() {
-    _currentMode = gotchi::getModeInfo(_currentMode).nextMode;
+    gotchi::Mode next = gotchi::getModeInfo(_currentMode).nextMode;
+    
+    // Skip disabled modes
+    for (int i = 0; i < 10 && !gotchi::canAccessMode(next); i++) {
+        next = gotchi::getModeInfo(next).nextMode;
+    }
+    _currentMode = next;
     
     gotchi::setMode(_currentMode);
     gotchi::onModeEnter(_currentMode);
@@ -677,38 +683,34 @@ void AppGotchi::renderUI() {
     }
     // BLE_SCAN mode - formatted device list
     else if (_currentMode == gotchi::Mode::BLE_SCAN) {
-        _networkListLabel->setSize(300, 70);
+        _networkListLabel->setSize(300, 90);
         _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
-        _networkListLabel->setBgColor(lv_color_hex(0x001522));  // Dark cyan bg
-        _networkListLabel->setTextColor(lv_color_hex(0x44DDDD));  // Cyan text
+        _networkListLabel->setBgColor(lv_color_hex(0x001522));
+        _networkListLabel->setTextColor(lv_color_hex(0x44DDDD));
         
-        // Show top 5 devices by signal strength with full MAC
         auto devices = gotchi::getBLEDevices();
-        char bleList[300] = {0};
-        int count = 0;
+        char bleList[400] = {0};
         
-        // Sort by signal strength (strongest first)
         std::vector<gotchi::BLEDeviceInfo> sorted = devices;
         std::sort(sorted.begin(), sorted.end(), [](const gotchi::BLEDeviceInfo& a, const gotchi::BLEDeviceInfo& b) {
             return a.rssi > b.rssi;
         });
         
-        strncat(bleList, "Device Name    MAC Address         Signal\n", sizeof(bleList) - 1);
-        strncat(bleList, "------------------------------------------\n", sizeof(bleList) - 1);
+        strncat(bleList, "Name       MAC          RSSI\n", sizeof(bleList) - 1);
+        strncat(bleList, "------------------------------\n", sizeof(bleList) - 1);
         
+        int count = 0;
         for (const auto& dev : sorted) {
             if (count >= 5) break;
-            char line[48];
-            char macStr[18];
-            snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
-                     dev.mac[0], dev.mac[1], dev.mac[2], dev.mac[3], dev.mac[4], dev.mac[5]);
-            snprintf(line, sizeof(line), "%-14s %-17s %ddBm\n",
-                     dev.name, macStr, (int)dev.rssi);
+            char line[50];
+            char macStr[13];
+            snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X%02X%02X", dev.mac[0], dev.mac[1], dev.mac[2], dev.mac[3], dev.mac[4]);
+            snprintf(line, sizeof(line), "%-10s %-11s %d\n", dev.name, macStr, (int)dev.rssi);
             strncat(bleList, line, sizeof(bleList) - strlen(bleList) - 1);
             count++;
         }
         if (devices.empty()) {
-            strncat(bleList, "Scanning for BLE devices...\n", sizeof(bleList) - 1);
+            strncat(bleList, "Scanning for BLE...\n", sizeof(bleList) - 1);
         }
         _networkListLabel->setText(bleList);
         return;
@@ -742,16 +744,16 @@ void AppGotchi::renderUI() {
         const char* statusStr = isRunning ? "Broadcasting" : "Stopped";
         
         snprintf(rogueDisplay, sizeof(rogueDisplay),
-            "===============================================\n"
+            "======================================\n"
             "   WARNING - EDUCATIONAL USE ONLY\n"
-            "===============================================\n"
+            "======================================\n"
             "Target SSID:  %s\n"
             "Target CH:    %d\n"
             "Status:       %s\n"
-            "-----------------------------------------------\n"
-            "Demo of rogue AP / evil twin attack vectors\n"
+            "--------------------------------------\n"
+            "Demo of rogue AP / evil twin attacks\n"
             "   Only test on networks YOU own!\n"
-            "===============================================",
+            "======================================",
             targetSSID, (int)targetCh, statusStr);
         
         _networkListLabel->setText(rogueDisplay);
@@ -799,23 +801,13 @@ void AppGotchi::renderUI() {
         int sessMins = (stats.sessionTimeSeconds % 3600) / 60;
         
         snprintf(statsDisplay, sizeof(statsDisplay),
-            "=========== STATS ===========\n"
-            "LEVEL:  Lv%d%s  |  XP: %d\n"
-            "PROGRESS: %d%% to next level\n"
-            "--------------------------------\n"
-            "ACHIEVEMENTS: %u/17 unlocked\n"
-            "--------------------------------\n"
-            "TOTAL NETWORKS: %u discovered\n"
-            "TOTAL HANDSHAKES: %u captured\n"
-            "--------------------------------\n"
-            "SESSION STATS:\n"
-            "  Networks: %u | Time: %dh%dm\n"
-            "  XP Gained: +%u this session\n"
-            "--------------------------------\n"
-            "SYSTEM:\n"
-            "  Uptime: %dh%dm%ds\n"
-            "  Heap: %d bytes (min: %d)\n"
-            "  GPS: %s (%d satellites)",
+            "=========== STATS ============\n"
+            "Lv: %d%s  XP: %d  Prog: %d%%\n"
+            "Ach: %u/17 | Nets: %u | HS: %u\n"
+            "------------------------------\n"
+            "Session: %u nets | %dh%dm | +%u XP\n"
+            "Uptime: %dh%dm%ds | Heap: %d\n"
+            "GPS: %s (%d sats)",
             (int)stats.level, prestigeStr, (int)stats.xp,
             gotchi::getXPProgress(stats.xp, stats.level),
             (unsigned)stats.achievementCount,
@@ -824,8 +816,8 @@ void AppGotchi::renderUI() {
             (unsigned)stats.sessionNetworks, sessHours, sessMins,
             (unsigned)stats.sessionXPGain,
             hours, mins, secs,
-            (int)stats.freeHeap, (int)stats.minHeap,
-            stats.gpsValid ? "Valid" : "No signal",
+            (int)stats.freeHeap,
+            stats.gpsValid ? "OK" : "No",
             (int)stats.gpsSatellites);
         
         _networkListLabel->setText(statsDisplay);
@@ -854,7 +846,7 @@ void AppGotchi::renderUI() {
     } else {
         // Reset label positions and colors for other modes (no networks found)
         _statsLabel->setSize(300, 75);
-        _statsLabel->align(LV_ALIGN_TOP_LEFT, 5, 5);
+        _statsLabel->align(LV_ALIGN_TOP_LEFT, 5, 10);
         _statsLabel->setBgColor(lv_color_hex(0x003320));  // Reset to green
         _statsLabel->setTextColor(lv_color_hex(0x00FF88));  // Reset text color
         _networkListLabel->setSize(300, 50);
@@ -1089,12 +1081,13 @@ void AppGotchi::renderUI() {
     if (gotchi::isDialogueEnabled(_currentMode)) {
         uint32_t interval = gotchi::getModeDialogueInterval(_currentMode);
         uint32_t now = GetHAL().millis();
-        if (interval > 0 && now - _lastIdleSpeak > interval && _idleDialogue.shouldSpeak(now)) {
+        if (interval > 0 && now - _lastIdleSpeak > interval) {
             _lastIdleSpeak = now;
             if (GetStackChan().hasAvatar()) {
                 const char* phrase = _idleDialogue.getModeSpecificPhrase(_currentMode);
                 GetStackChan().avatar().setSpeech(phrase);
                 GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(2500, 180, true));
+                mclog::tagInfo(getAppInfo().name, "Idle phrase: %s", phrase);
             }
         }
     }
