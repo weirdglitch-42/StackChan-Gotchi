@@ -529,6 +529,12 @@ void AppGotchi::updateHeadAnimation() {
             idleDir = !idleDir;
             _headPitchOffset = (now / 4000 % 2) ? 30 : -30;
         } else if (_currentMode == gotchi::Mode::HUNT) {
+            // Reset label to default before applying mode-specific styling
+            _networkListLabel->setSize(300, 50);
+            _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
+            _networkListLabel->setBgColor(lv_color_hex(0x001a00));
+            _networkListLabel->setTextColor(lv_color_hex(0x00FF00));
+            
             auto networks = gotchi::getNetworks();
             int netCount = networks.size();
             

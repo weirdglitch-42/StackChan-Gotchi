@@ -15,6 +15,7 @@ A **pwnagotchi-style WiFi/BLE reconnaissance companion** for M5Stack CoreS3 robo
 **Hardware**: M5Stack CoreS3 (ESP32-S3, 16MB Flash, 8MB PSRAM) + GPS Unit (optional)
 
 **Inspiration**:
+- [pwnagotchi] (https://github.com/evilsocket/pwnagotchi) - the original security "gotchi" for rPi
 - [M5PORKCHOP](https://github.com/M-Tech-Innovation/M5PORKCHOP) - Gamification, XP system, multiple modes, personality
 - [M5Gotchi](https://github.com/xenon-mastodon/M5Gotchi) - Pwnagotchi UI, auto mode, web interface
 
@@ -127,3 +128,4 @@ This tool is for **educational and security research purposes only**.
 - StackChan: https://github.com/M5Stack/M5Stack-StackChan
 - M5PORKCHOP: https://github.com/0ct0sec/M5PORKCHOP
 - M5Gotchi: https://github.com/Devsur11/M5Gotchi/
+- (THE OG) pwnagotchi: https://github.com/evilsocket/pwnagotchi

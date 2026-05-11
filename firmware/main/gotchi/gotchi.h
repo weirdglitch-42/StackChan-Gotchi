@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include <gotchi/gps.h>
 
 // Forward declaration (avoid circular include with storage.h)
 namespace gotchi {
@@ -14,6 +15,9 @@ struct GotchiConfig;
 
 namespace gotchi {
 
+//=============================================================================
+// ENUMS
+//=============================================================================
 enum class Mode {
     IDLE,
     SCOUT,
@@ -35,6 +39,9 @@ enum class Mood {
     SAD
 };
 
+//=============================================================================
+// DATA STRUCTURES
+//=============================================================================
 struct NetworkInfo {
     char ssid[33];  // Fixed size to avoid heap in WiFi callback
     uint8_t bssid[6];
@@ -65,11 +72,6 @@ struct BLEDeviceInfo {
     uint32_t lastSeen;       // Timestamp
 };
 
-void addHandshake(const HandshakeInfo& hs);
-std::vector<HandshakeInfo> getHandshakes();
-int getHandshakeCount();
-bool hasCompleteHandshake(const uint8_t* bssid);
-
 struct ChannelInfo {
     uint8_t channel;
     uint8_t networkCount;
@@ -77,20 +79,6 @@ struct ChannelInfo {
     int8_t avgRssi;
 };
 
-std::vector<ChannelInfo> getChannelAnalysis();
-
-bool hasStorage();
-
-const char* getModeName(Mode mode);
-const char* getLevelTitle(int level);
-int getXPForLevel(int level);
-int getXPProgress(int32_t xp, int level);
-bool isDeepThoughtUnlocked();
-uint8_t getPrestige();
-uint32_t getAchievementCount();
-uint32_t getAchievementsBitmask();  // Get full achievement bitmask
-
-// Challenge system
 struct ChallengeInfo {
     const char* name;
     const char* description;
@@ -99,13 +87,6 @@ struct ChallengeInfo {
     bool isOneTime;
 };
 
-bool getDailyChallenge(ChallengeInfo& challenge);
-bool completeDailyChallenge();
-bool hasCompletedOneTimeChallenge(int id);
-bool completeOneTimeChallenge(int id);
-void refreshDailyChallenge();
-
-// Stats extended
 struct Stats {
     int32_t xp;
     int32_t level;
@@ -117,13 +98,13 @@ struct Stats {
     uint32_t uptimeSeconds;
     
     // Session statistics (reset on reboot)
-    uint32_t sessionNetworks;      // Networks found this session
-    uint32_t sessionTimeSeconds;   // Time in current mode
-    uint32_t sessionStartTime;     // When current mode started
-    uint32_t sessionXPGain;        // XP earned this session
-    uint8_t currentChannel;        // Current WiFi channel
-    int32_t freeHeap;              // Current heap in bytes
-    int32_t minHeap;               // Minimum heap this session
+    uint32_t sessionNetworks;
+    uint32_t sessionTimeSeconds;
+    uint32_t sessionStartTime;
+    uint32_t sessionXPGain;
+    uint8_t currentChannel;
+    int32_t freeHeap;
+    int32_t minHeap;
     
     // GPS data
     bool gpsValid;
@@ -132,40 +113,84 @@ struct Stats {
     double gpsLon;
 };
 
+//=============================================================================
+// LIFECYCLE
+//=============================================================================
 void init();
 void update();
 void shutdown();
 
+//=============================================================================
+// MODE & STATE
+//=============================================================================
 void setMode(Mode mode);
 Mode getCurrentMode();
-
 void setMood(Mood mood);
 Mood getCurrentMood();
 
+//=============================================================================
+// STATS & PROGRESS
+//=============================================================================
 Stats getStats();
 GotchiConfig getConfig();
 void addXP(int32_t amount);
-bool shouldShowHuntDisclaimer();
-void acknowledgeHuntDisclaimer();
+const char* getLevelTitle(int level);
+int getXPForLevel(int level);
+int getXPProgress(int32_t xp, int level);
 
+//=============================================================================
+// ACHIEVEMENTS & CHALLENGES
+//=============================================================================
+uint32_t getAchievementCount();
+uint32_t getAchievementsBitmask();
+bool getDailyChallenge(ChallengeInfo& challenge);
+bool completeDailyChallenge();
+
+//=============================================================================
+// WIFI OPERATIONS
+//=============================================================================
 std::vector<NetworkInfo> getNetworks();
+int getNetworkCount();
+std::vector<HandshakeInfo> getHandshakes();
+int getHandshakeCount();
+bool hasCompleteHandshake(const uint8_t* bssid);
+std::vector<ChannelInfo> getChannelAnalysis();
 
 void startSniff();
 void stopSniff();
 void startScout();
 void stopScout();
+
+//=============================================================================
+// ROGUE AP (Educational)
+//=============================================================================
 void startRogue();
 void stopRogue();
+bool isBeaconSpamming();
+
+//=============================================================================
+// CONFIG MODE
+//=============================================================================
 void startConfigMode();
 void stopConfigMode();
-
-bool isSniffing();
-bool isBeaconSpamming();
 bool isConfigMode();
 
+//=============================================================================
+// BLUETOOTH LE
+//=============================================================================
 std::vector<BLEDeviceInfo> getBLEDevices();
 void startBLEScan();
 void stopBLEScan();
 int getBLEDeviceCount();
+
+//=============================================================================
+// UTILITIES
+//=============================================================================
+bool hasStorage();
+const char* getModeName(Mode mode);
+bool isDeepThoughtUnlocked();
+uint8_t getPrestige();
+bool shouldShowHuntDisclaimer();
+void acknowledgeHuntDisclaimer();
 
 }
