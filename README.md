@@ -125,5 +125,5 @@ This tool is for **educational and security research purposes only**.
 ## References
 
 - StackChan: https://github.com/M5Stack/M5Stack-StackChan
-- M5PORKCHOP: https://github.com/M-Tech-Innovation/M5PORKCHOP
-- M5Gotchi: https://github.com/xenon-mastodon/M5Gotchi
+- M5PORKCHOP: https://github.com/0ct0sec/M5PORKCHOP
+- M5Gotchi: https://github.com/Devsur11/M5Gotchi/
