@@ -7,6 +7,9 @@
 #include "gps.h"
 #include "xp_system.h"
 #include "achievement_system.h"
+#include "web_manager.h"
+#include "mode.h"
+#include "rogue_manager.h"
 #include <esp_wifi.h>
 #include <esp_netif.h>
 #include <esp_event.h>
@@ -372,18 +375,7 @@ static int ieee80211_hdrlen(uint16_t fc) {
 }
 
 const char* getModeName(Mode mode) {
-    switch (mode) {
-        case Mode::IDLE: return "IDLE";
-        case Mode::SCOUT: return "SCOUT";
-        case Mode::HUNT: return "HUNT";
-        case Mode::WARDIVE: return "WARDIVE";
-        case Mode::SPECTRUM: return "SPECTRUM";
-        case Mode::BLE_SCAN: return "BLE-SCAN";
-        case Mode::ROGUE: return "ROGUE";
-        case Mode::STATS: return "STATS";
-        case Mode::CONFIG: return "CONFIG";
-        default: return "UNKNOWN";
-    }
+    return getModeInfo(mode).name;
 }
 
 const char* getLevelTitle(int level) {
@@ -519,13 +511,12 @@ void update() {
     uint32_t now = GetHAL().millis();
     uint32_t uptime = (now - _startTime) / 1000;
 
-    // Channel hopping - prioritize primary channels 1, 6, 11 for better coverage
-    if (_sniffing && (now - _lastChannelHop) > 200) {
+    // Channel hopping - use mode-specific interval
+    const ModeInfo& mi = getModeInfo(_currentMode);
+    if (_sniffing && mi.enableChannelHop && (now - _lastChannelHop) > mi.hopIntervalMs) {
         static uint8_t hopIndex = 0;
-        // Primary channels get more dwell time, secondary channels scanned less
-        static const uint8_t channelSequence[] = {1, 6, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
-        hopIndex = (hopIndex + 1) % 13;
-        _currentChannel = channelSequence[hopIndex];
+        hopIndex = (hopIndex + 1) % getChannelSequenceLength();
+        _currentChannel = getChannelSequence()[hopIndex];
         esp_wifi_set_channel(_currentChannel, WIFI_SECOND_CHAN_NONE);
         _channelsScanned++;
         _lastChannelHop = now;
@@ -546,19 +537,31 @@ static TaskHandle_t _deauthTaskHandle = nullptr;
 static bool _deauthActive = false;
 
 static void sendDeauthFrame(const uint8_t* bssid, uint8_t reason) {
-    uint8_t deauth[32];
-    memset(deauth, 0, sizeof(deauth));
+    // Try deauth with proper frame - 26 byte minimum for management frame
+    uint8_t deauth[32] = {0};
     
-    deauth[0] = 0xC0;
-    deauth[1] = 0x00;
-    deauth[2] = 0x00;
-    deauth[3] = 0x00;
-    memcpy(&deauth[4], bssid, 6);
+    // IEEE 802.11 Deauthentication frame
+    // FC(2) | Dur(2) | Addr1(6) | Addr2(6) | Addr3(6) | Seq(2) | Reason(2)
+    uint16_t fc = 0x00C0;  // Deauth frame
+    
+    memcpy(&deauth[0], &fc, 2);
+    deauth[2] = 0x00; deauth[3] = 0x00;  // Duration
+    
+    // Address 1: DA (broadcast)
+    memset(&deauth[4], 0xFF, 6);
+    // Address 2: SA (AP)
     memcpy(&deauth[10], bssid, 6);
+    // Address 3: BSSID
     memcpy(&deauth[16], bssid, 6);
-    deauth[22] = reason;
     
-    esp_wifi_80211_tx(WIFI_IF_STA, deauth, 23, false);
+    // Sequence
+    deauth[22] = 0; deauth[23] = 0;
+    
+    // Reason code
+    deauth[24] = reason;
+    deauth[25] = 0;
+    
+    esp_wifi_80211_tx(WIFI_IF_STA, deauth, 26, false);
 }
 
 static void deauthTask(void* param) {
@@ -715,32 +718,7 @@ void setMode(Mode mode) {
             break;
     }
 
-    switch (mode) {
-        case Mode::HUNT:
-            _currentMood = Mood::FOCUSED;
-            break;
-        case Mode::SCOUT:
-            _currentMood = Mood::NEUTRAL;
-            break;
-        case Mode::WARDIVE:
-            _currentMood = Mood::EXCITED;
-            break;
-        case Mode::SPECTRUM:
-            _currentMood = Mood::FOCUSED;
-            break;
-        case Mode::BLE_SCAN:
-            _currentMood = Mood::FOCUSED;
-            break;
-        case Mode::ROGUE:
-            _currentMood = Mood::EXCITED;
-            break;
-        case Mode::CONFIG:
-            _currentMood = Mood::HAPPY;
-            break;
-        default:
-            _currentMood = Mood::HAPPY;
-            break;
-    }
+    _currentMood = getModeInfo(mode).mood;
 }
 
 Mode getCurrentMode() {
@@ -797,26 +775,8 @@ void addXP(int32_t amount) {
     if (amount <= 0) return;
     
     // Apply mode-specific multipliers to XP
-    float multiplier = 1.0f;
-    switch (_currentMode) {
-        case Mode::WARDIVE:
-            multiplier = 1.5f;
-            break;
-        case Mode::SPECTRUM:
-            multiplier = 1.2f;
-            break;
-        case Mode::SCOUT:
-            multiplier = 0.8f;
-            break;
-        case Mode::IDLE:
-            multiplier = 0.0f;
-            break;
-        default:
-            multiplier = 1.0f;
-            break;
-    }
-    
-int32_t effectiveAmount = (int32_t)(amount * multiplier);
+    float multiplier = getModeInfo(_currentMode).xpMultiplier;
+    int32_t effectiveAmount = (int32_t)(amount * multiplier);
     _xpSystem.addXP(effectiveAmount);
 }
 
@@ -1087,114 +1047,17 @@ void stopBLEScan() {
     ESP_LOGI(TAG, "BLE scan stopped, found %d devices", (int)_bleDevices.size());
 }
 
-static TaskHandle_t _beaconTaskHandle = nullptr;
 static TaskHandle_t _configTaskHandle = nullptr;
-static httpd_handle_t _httpServer = nullptr;
 static esp_netif_t* _ap_netif_handle = nullptr;  // Shared AP netif handle for CONFIG/ROGUE modes
 
-static const char* ROGUE_SSIDS[] = {
-    "Free_WiFi", "Airport_WiFi", "Hotel_WiFi", "Coffee_Shop", "Starbucks",
-    "McDonalds", "Library_WiFi", "School_Network", "Office_Guest", "Conference",
-    "Neighbor_WiFi", "Linksys", "NETGEAR", "TP-Link", "Default",
-    "XFINITY", "ATT_WiFi", "Verizon_WiFi", "Cafe_Free", "Public_WiFi"
-};
-
-static void sendBeaconFrame(const char* ssid, const uint8_t* bssid, uint8_t channel) {
-    uint8_t beacon[128];
-    memset(beacon, 0, sizeof(beacon));
-    
-    beacon[0] = 0x80;
-    beacon[1] = 0x00;
-    beacon[2] = 0x00;
-    beacon[3] = 0x00;
-    memset(&beacon[4], 0xFF, 6);
-    memcpy(&beacon[10], bssid, 6);
-    memcpy(&beacon[16], bssid, 6);
-    beacon[18] = 0x00;
-    beacon[19] = 0x00;
-    
-    uint64_t timestamp = GetHAL().millis() * 1000;
-    for (int i = 0; i < 8; i++) {
-        beacon[20 + i] = (timestamp >> (i * 8)) & 0xFF;
-    }
-    beacon[28] = 0x64;
-    beacon[29] = 0x00;
-    beacon[30] = 0x01;
-    beacon[31] = 0x01;
-    
-    int pos = 32;
-    beacon[pos++] = 0x00;
-    beacon[pos++] = strlen(ssid);
-    memcpy(&beacon[pos], ssid, strlen(ssid));
-    pos += strlen(ssid);
-    
-    beacon[pos++] = 0x01;
-    beacon[pos++] = 4;
-    beacon[pos++] = 0x82;
-    beacon[pos++] = 0x84;
-    beacon[pos++] = 0x8B;
-    beacon[pos++] = 0x96;
-    
-    beacon[pos++] = 0x03;
-    beacon[pos++] = 1;
-    beacon[pos++] = channel;
-    
-    esp_wifi_80211_tx(WIFI_IF_AP, beacon, pos, false);
-}
-
-static void beaconTask(void* param) {
-    (void)param;
-    ESP_LOGI(TAG, "Beacon spam task started");
-    
-    uint32_t beaconCount = 0;
-    uint32_t lastLog = GetHAL().millis();
-    
-    uint8_t bssids[5][6];
-    for (int i = 0; i < 5; i++) {
-        bssids[i][0] = 0x00;
-        bssids[i][1] = 0x11;
-        bssids[i][2] = 0x22;
-        bssids[i][3] = 0x33;
-        bssids[i][4] = 0x44 + i;
-        bssids[i][5] = (uint8_t)(esp_random() & 0xFF);
-    }
-    
-    // Fixed channel 6 - no hopping (like PORKCHOP BACON mode)
-    uint8_t channel = 6;
-    
-    while (_beaconSpamming) {
-        // Send batch of fake AP beacons
-        for (int i = 0; i < 5 && _beaconSpamming; i++) {
-            sendBeaconFrame(ROGUE_SSIDS[(beaconCount + i) % 20], bssids[i], channel);
-            beaconCount++;
-            vTaskDelay(pdMS_TO_TICKS(100));  // 100ms between beacons (balanced rate)
-        }
-        
-        vTaskDelay(pdMS_TO_TICKS(200));
-        
-        if (GetHAL().millis() - lastLog > 5000) {
-            ESP_LOGI(TAG, "Beacons sent: %u on CH%d", beaconCount, channel);
-            lastLog = GetHAL().millis();
-        }
-    }
-    
-    ESP_LOGI(TAG, "Beacon spam stopped, sent %u frames", beaconCount);
-    _beaconSpamming = false;
-    vTaskDelete(NULL);
-}
-
 void startRogue() {
-    if (_beaconSpamming) return;
-    
     ESP_LOGI(TAG, "Starting ROGUE mode - beacon spam");
     ESP_LOGW(TAG, "WARNING: Educational use only!");
     
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(200));
     
-    // Only init if not already done - handle case where event loop exists
     static bool netif_initialized = false;
-    static bool ap_netif_created = false;
     
     if (!netif_initialized) {
         esp_err_t err = esp_netif_init();
@@ -1210,24 +1073,19 @@ void startRogue() {
         netif_initialized = true;
     }
     
-    // Try to get existing AP netif first (handles case from CONFIG mode or previous ROGUE run)
     if (!_ap_netif_handle) {
         _ap_netif_handle = esp_netif_get_default_netif();
     }
     
-    // If still no handle, try to create one
     if (!_ap_netif_handle) {
         _ap_netif_handle = esp_netif_create_default_wifi_ap();
         if (_ap_netif_handle) {
-            ap_netif_created = true;
             ESP_LOGI(TAG, "AP netif created");
         }
     } else {
         ESP_LOGI(TAG, "Using existing AP netif");
-        ap_netif_created = true;
     }
     
-    // Re-init WiFi to ensure clean state
     esp_wifi_deinit();
     vTaskDelay(pdMS_TO_TICKS(100));
     
@@ -1246,10 +1104,23 @@ void startRogue() {
     }
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    // Set channel 6 (standard, less congested)
     ret = esp_wifi_set_channel(6, WIFI_SECOND_CHAN_NONE);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "WiFi channel set failed: %d", ret);
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    wifi_config_t ap_config = {0};
+    ap_config.ap.ssid_len = 0;
+    ap_config.ap.channel = 6;
+    ap_config.ap.authmode = WIFI_AUTH_OPEN;
+    ap_config.ap.max_connection = 0;
+    ap_config.ap.beacon_interval = 100;
+    strcpy((char*)ap_config.ap.ssid, " ");
+    ap_config.ap.ssid[0] = 0;
+    ret = esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "AP config cleared: %d", ret);
     }
     vTaskDelay(pdMS_TO_TICKS(100));
     
@@ -1261,8 +1132,20 @@ void startRogue() {
     vTaskDelay(pdMS_TO_TICKS(500));
     
     _wifiInitialized = true;
+    
+    RogueManager& rogue = getRogueManager();
+    rogue.loadFromNVS();
+    
+    if (!rogue.getTarget().valid) {
+        auto networks = getNetworks();
+        if (!networks.empty()) {
+            rogue.autoSelectStrongest(networks);
+            ESP_LOGI(TAG, "Auto-selected strongest network for ROGUE");
+        }
+    }
+    
+    rogue.start();
     _beaconSpamming = true;
-    xTaskCreate(beaconTask, "beacon_task", 4096, NULL, 5, &_beaconTaskHandle);
     
     ESP_LOGI(TAG, "ROGUE mode active - ready to send beacons");
 }
@@ -1270,12 +1153,8 @@ void startRogue() {
 void stopRogue() {
     if (!_beaconSpamming) return;
     
+    getRogueManager().stop();
     _beaconSpamming = false;
-    
-    if (_beaconTaskHandle) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-        _beaconTaskHandle = nullptr;
-    }
     
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -1283,325 +1162,9 @@ void stopRogue() {
     ESP_LOGI(TAG, "ROGUE mode stopped");
 }
 
-static esp_err_t root_handler(httpd_req_t* req) {
-    const char* html = 
-        "<!DOCTYPE html><html>"
-        "<head><title>StackChan-Gotchi</title>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<style>"
-        "body{font-family:Arial;margin:0;background:#1a1a2e;color:#eee;font-size:14px}"
-        "h1{color:#00ff88;text-align:center;margin:10px 0;font-size:20px}"
-        ".nav{display:flex;background:#0f3460;padding:5px}"
-        ".nav button{flex:1;padding:10px;background:#16213e;color:#888;border:none;font-weight:bold}"
-        ".nav button.active{background:#00ff88;color:#000}"
-        ".page{display:none}.page.active{display:block}"
-        ".card{background:#16213e;padding:12px;margin:10px;border-radius:8px}"
-        "select{padding:10px;margin:5px 0;width:100%;background:#0f3460;color:#fff;border:1px solid #00ff88;border-radius:4px}"
-        "button{background:#00ff88;color:#000;padding:10px;border:none;border-radius:5px;cursor:pointer;width:100%;font-weight:bold;margin:5px 0}"
-        "button:hover{background:#00cc6a}"
-        "button.danger{background:#ff6b6b;color:#fff}"
-        "button.secondary{background:#4a4a8a;color:#fff}"
-        "p{color:#aaa;margin:5px 0}.value{color:#00ff88;font-weight:bold}"
-        "table{width:100%;border-collapse:collapse;margin:10px 0}"
-        "td,th{padding:8px;text-align:left;border-bottom:1px solid #333}"
-        "th{color:#00ff88}"
-        "#message{text-align:center;padding:10px;border-radius:4px;display:none;margin:10px}"
-        ".success{background:#00ff8833;color:#00ff88}"
-        ".error{background:#ff000033;color:#ff4444}"
-        "</style></head>"
-        "<body>"
-        "<h1>StackChan-Gotchi</h1>"
-        "<div class='nav'>"
-        "  <button id='btnConfig' class='active' onclick=\"showPage('config')\">Config</button>"
-        "  <button id='btnStats' onclick=\"showPage('stats')\">Stats</button>"
-        "  <button id='btnNetworks' onclick=\"showPage('networks')\">Networks</button>"
-        "  <button id='btnFiles' onclick=\"showPage('files')\">Files</button>"
-        "</div>"
-        "<div id='message'></div>"
-        
-        "<!-- CONFIG PAGE -->"
-        "<div id='pageConfig' class='page active'>"
-        "  <div class='card'>"
-        "    <p>Current: <span class='value' id='currentMode'>Loading...</span></p>"
-        "    <p>Level: <span class='value' id='level'>-</span> | XP: <span class='value' id='xp'>-</span> | Nets: <span class='value' id='networks'>-</span></p>"
-        "  </div>"
-        "  <div class='card'>"
-        "    <p><strong>Mode Selection</strong></p>"
-        "    <select id='mode'>"
-        "      <option value='IDLE'>IDLE - Resting</option>"
-        "      <option value='SCOUT'>SCOUT - WiFi Scan</option>"
-        "      <option value='HUNT'>HUNT - Promiscuous</option>"
-        "      <option value='WARDIVE'>WARDIVE - Wardriving</option>"
-        "      <option value='SPECTRUM'>SPECTRUM - Spectrum</option>"
-        "      <option value='BLE_SCAN'>BLE_SCAN - Bluetooth</option>"
-        "      <option value='ROGUE'>ROGUE - Beacon Spam</option>"
-        "      <option value='STATS'>STATS - Statistics</option>"
-        "      <option value='CONFIG'>CONFIG - This Page</option>"
-        "    </select>"
-        "    <button onclick='saveConfig()'>Apply Mode</button>"
-        "  </div>"
-        "  <div class='card'>"
-        "    <p><strong>Quick Actions</strong></p>"
-        "    <button class='danger' onclick='stopRogue()'>Stop Rogue Mode</button>"
-        "    <button class='secondary' onclick='restartAP()'>Restart AP</button>"
-        "  </div>"
-        "</div>"
-        
-        "<!-- STATS PAGE -->"
-        "<div id='pageStats' class='page'>"
-        "  <div class='card'>"
-        "    <p><strong>Player Stats</strong></p>"
-        "    <table>"
-        "      <tr><td>Level</td><td class='value' id='statsLevel'>-</td></tr>"
-        "      <tr><td>XP</td><td class='value' id='statsXP'>-</td></tr>"
-        "      <tr><td>Networks</td><td class='value' id='statsNetworks'>-</td></tr>"
-        "      <tr><td>Handshakes</td><td class='value' id='statsHS'>-</td></tr>"
-        "      <tr><td>Prestige</td><td class='value' id='statsPrestige'>-</td></tr>"
-        "      <tr><td>Uptime</td><td class='value' id='statsUptime'>-</td></tr>"
-        "      <tr><td>Achievements</td><td class='value' id='statsAch'>-</td></tr>"
-        "    </table>"
-        "  </div>"
-        "  <div class='card'>"
-        "    <p><strong>Session Stats</strong></p>"
-        "    <p>Session XP: <span class='value' id='sessionXP'>-</span></p>"
-        "    <p>Session Time: <span class='value' id='sessionTime'>-</span></p>"
-        "  </div>"
-        "</div>"
-        
-        "<!-- NETWORKS PAGE -->"
-        "<div id='pageNetworks' class='page'>"
-        "  <div class='card'>"
-        "    <p><strong>Discovered Networks</strong></p>"
-        "    <div id='networkList'>Loading...</div>"
-        "  </div>"
-        "</div>"
-        
-        "<!-- FILES PAGE -->"
-        "<div id='pageFiles' class='page'>"
-        "  <div class='card'>"
-        "    <p><strong>Internal Storage</strong></p>"
-        "    <p>Mount: <span class='value'>/sdcard</span> (Internal Flash)</p>"
-        "    <p>Free: <span class='value' id='storageFree'>Loading...</span></p>"
-        "    <p>Total: <span class='value'>~2MB</span></p>"
-        "  </div>"
-        "  <div class='card'>"
-        "    <p><strong>Note</strong></p>"
-        "    <p style='font-size:12px;color:#888'>"
-        "    SD card unavailable on CoreS3 (hardware pin conflict).<br>"
-        "    Using internal flash FATFS partition.<br>"
-        "    Files stored: config.json, networks.json, wardriving.csv, handshakes/, logs/"
-        "    </p>"
-        "  </div>"
-        "</div>"
-        
-        "<script>"
-        "var currentPage='config';"
-        "function showPage(p){"
-        "  currentPage=p;"
-        "  document.querySelectorAll('.page').forEach(function(x){x.classList.remove('active')});"
-        "  document.querySelectorAll('.nav button').forEach(function(x){x.classList.remove('active')});"
-        "  document.getElementById('page'+p.charAt(0).toUpperCase()+p.slice(1)).classList.add('active');"
-        "  document.getElementById('btn'+p.charAt(0).toUpperCase()+p.slice(1)).classList.add('active');"
-        "}"
-        "function showMessage(msg,isError){"
-        "  var m=document.getElementById('message');m.textContent=msg;m.className=isError?'error':'success';m.style.display='block';"
-        "  setTimeout(function(){m.style.display='none'},3000);"
-        "}"
-        "function saveConfig(){"
-        "  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},"
-        "  body:JSON.stringify({mode:document.getElementById('mode').value})})"
-        "  .then(function(r){return r.json()}).then(function(d){showMessage('Mode: '+d.mode,false);updateStats();})"
-        "  .catch(function(e){showMessage('Error: '+e,true)});"
-        "}"
-        "function stopRogue(){fetch('/api/rogue',{method:'POST'}).then(function(){showMessage('Rogue stopped',false)}).catch(function(){});}"
-        "function restartAP(){location.reload();}"
-        "function updateStats(){"
-        "  fetch('/api/stats').then(function(r){return r.json()}).then(function(d){"
-        "    document.getElementById('currentMode').textContent=d.mode;"
-        "    document.getElementById('level').textContent=d.level;"
-        "    document.getElementById('xp').textContent=d.xp;"
-        "    document.getElementById('networks').textContent=d.networks;"
-        "    var ms=document.getElementById('mode').options;"
-        "    for(var i=0;i<ms.length;i++){if(ms[i].value===d.mode){ms[i].selected=true;break;}}"
-        "    document.getElementById('statsLevel').textContent=d.level;"
-        "    document.getElementById('statsXP').textContent=d.xp;"
-        "    document.getElementById('statsNetworks').textContent=d.networks;"
-        "    document.getElementById('statsHS').textContent=d.handshakes;"
-        "    document.getElementById('statsPrestige').textContent=d.prestige;"
-        "    document.getElementById('statsUptime').textContent=d.uptime;"
-        "    document.getElementById('statsAch').textContent=d.achievements+'/17';"
-        "    document.getElementById('sessionXP').textContent='+'+d.sessionXP;"
-        "    document.getElementById('sessionTime').textContent=d.sessionTime;"
-        "    var nl=document.getElementById('networkList');"
-        "    if(d.networksList && d.networksList.length>0){"
-        "      nl.innerHTML='<table><tr><th>SSID</th><th>Ch</th><th>dBm</th></tr>'+"
-        "      d.networksList.map(function(n){return '<tr><td>'+n.ssid+'</td><td>'+n.ch+'</td><td>'+n.rssi+'</td></tr>'}).join('')+'</table>';"
-        "    }else{nl.innerHTML='<p>No networks</p>';}"
-        "  }).catch(function(){});"
-        "  fetch('/api/files').then(function(r){return r.json()}).then(function(f){"
-        "    var freeKB=Math.floor(f.freeSpace/1024);"
-        "    document.getElementById('storageFree').textContent=freeKB+' KB';"
-        "  }).catch(function(){});"
-        "}"
-        "setInterval(updateStats,3000);"
-        "updateStats();"
-        "</script></body></html>";
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, html, strlen(html));
-    return ESP_OK;
-}
-
-static esp_err_t api_config_handler(httpd_req_t* req) {
-    if (req->method == HTTP_GET) {
-        Stats s = getStats();
-        char json[256];
-        snprintf(json, sizeof(json), 
-            "{\"mode\":\"%s\",\"level\":%d,\"xp\":%d,\"apActive\":%s}",
-            getModeName(getCurrentMode()),
-            (int)s.level,
-            (int)s.xp,
-            isConfigMode() ? "true" : "false");
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, json, strlen(json));
-    } else {
-        // POST - read body
-        char content[256];
-        int ret = httpd_req_recv(req, content, sizeof(content) - 1);
-        if (ret > 0) {
-            content[ret] = '\0';
-            // Simple parse - look for mode value
-            char* modeStart = strstr(content, "\"mode\"");
-            if (modeStart) {
-                char* colon = strchr(modeStart, ':');
-                if (colon) {
-                    char* quote = strchr(colon, '\"');
-                    if (quote) {
-                        char* endQuote = strchr(quote + 1, '\"');
-                        if (endQuote) {
-                            *endQuote = '\0';
-                            Mode newMode = Mode::IDLE;
-                            if (strcmp(quote + 1, "SCOUT") == 0) newMode = Mode::SCOUT;
-                            else if (strcmp(quote + 1, "HUNT") == 0) newMode = Mode::HUNT;
-                            else if (strcmp(quote + 1, "WARDIVE") == 0) newMode = Mode::WARDIVE;
-                            else if (strcmp(quote + 1, "SPECTRUM") == 0) newMode = Mode::SPECTRUM;
-                            else if (strcmp(quote + 1, "BLE_SCAN") == 0) newMode = Mode::BLE_SCAN;
-                            else if (strcmp(quote + 1, "ROGUE") == 0) newMode = Mode::ROGUE;
-                            else if (strcmp(quote + 1, "STATS") == 0) newMode = Mode::STATS;
-                            else if (strcmp(quote + 1, "IDLE") == 0) newMode = Mode::IDLE;
-                            setMode(newMode);
-                            
-                            char resp[128];
-                            snprintf(resp, sizeof(resp), "{\"status\":\"ok\",\"mode\":\"%s\"}", getModeName(newMode));
-                            httpd_resp_set_type(req, "application/json");
-                            httpd_resp_send(req, resp, strlen(resp));
-                            return ESP_OK;
-                        }
-                    }
-                }
-            }
-        }
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request");
-    }
-    return ESP_OK;
-}
-
-static esp_err_t api_stats_handler(httpd_req_t* req) {
-    Stats s = getStats();
-    std::vector<NetworkInfo> networks = getNetworks();
-    
-    // Build networks list JSON
-    char networksJson[1024] = "[";
-    int count = 0;
-    for (const auto& n : networks) {
-        if (count > 0) strcat(networksJson, ",");
-        char entry[128];
-        snprintf(entry, sizeof(entry), "{\"ssid\":\"%.20s\",\"ch\":%d,\"rssi\":%d}",
-            n.ssid, n.channel, (int)n.rssi);
-        strcat(networksJson, entry);
-        count++;
-        if (count >= 20) break;  // Limit to 20 networks
-    }
-    strcat(networksJson, "]");
-    
-    uint32_t sessionTime = (GetHAL().millis() - s.sessionStartTime) / 1000;
-    uint32_t sessionMins = sessionTime / 60;
-    uint32_t sessionSecs = sessionTime % 60;
-    
-    char json[2048];
-    snprintf(json, sizeof(json),
-        "{\"mode\":\"%s\",\"level\":%d,\"xp\":%d,\"networks\":%u,"
-        "\"rogue\":%s,\"config\":%s,\"heap\":%u,"
-        "\"handshakes\":%u,\"prestige\":%u,\"uptime\":\"%02uh%02um\","
-        "\"achievements\":%u,\"sessionXP\":%d,\"sessionTime\":\"%02u:%02u\","
-        "\"sessionNetworks\":%u,\"networksList\":%s}",
-        getModeName(getCurrentMode()),
-        (int)s.level,
-        (int)s.xp,
-        (unsigned int)networks.size(),
-        isBeaconSpamming() ? "true" : "false",
-        isConfigMode() ? "true" : "false",
-        (unsigned int)esp_get_free_heap_size(),
-        (unsigned int)s.handshakesCaptured,
-        (unsigned int)s.prestige,
-        (unsigned int)(s.uptimeSeconds / 3600),
-        (unsigned int)((s.uptimeSeconds % 3600) / 60),
-        (unsigned int)s.achievementCount,
-        (int)s.sessionXPGain,
-        (unsigned int)sessionMins, (unsigned int)sessionSecs,
-        (unsigned int)s.sessionNetworks,
-        networksJson);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json, strlen(json));
-    return ESP_OK;
-}
-
-static esp_err_t api_rogue_handler(httpd_req_t* req) {
-    if (isBeaconSpamming()) {
-        stopRogue();
-    }
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"status\":\"stopped\"}", 18);
-    return ESP_OK;
-}
-
-static esp_err_t api_files_handler(httpd_req_t* req) {
-    // Return basic storage info
-    char json[512];
-    int64_t freeSpace = gotchi::getStorageFreeSpace();
-    int64_t totalSpace = 2 * 1024 * 1024;  // ~2MB estimate
-    
-    snprintf(json, sizeof(json),
-        "{\"freeSpace\":%lld,\"totalSpace\":%lld,\"mountPoint\":\"%s\"}",
-        (long long)freeSpace, (long long)totalSpace, "/sdcard");
-    
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json, strlen(json));
-    return ESP_OK;
-}
-
+// HTTP handlers moved to WebManager class (web_manager.cpp)
 static void startHttpServer() {
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port = 80;
-    config.stack_size = 4096;
-    
-    httpd_uri_t root_uri = {.uri = "/", .method = HTTP_GET, .handler = root_handler, .user_ctx = nullptr};
-    httpd_uri_t api_config_uri = {.uri = "/api/config", .method = HTTP_GET, .handler = api_config_handler, .user_ctx = nullptr};
-    httpd_uri_t api_config_post_uri = {.uri = "/api/config", .method = HTTP_POST, .handler = api_config_handler, .user_ctx = nullptr};
-    httpd_uri_t api_stats_uri = {.uri = "/api/stats", .method = HTTP_GET, .handler = api_stats_handler, .user_ctx = nullptr};
-    httpd_uri_t api_rogue_uri = {.uri = "/api/rogue", .method = HTTP_POST, .handler = api_rogue_handler, .user_ctx = nullptr};
-    httpd_uri_t api_files_uri = {.uri = "/api/files", .method = HTTP_GET, .handler = api_files_handler, .user_ctx = nullptr};
-    
-    if (httpd_start(&_httpServer, &config) == ESP_OK) {
-        httpd_register_uri_handler(_httpServer, &root_uri);
-        httpd_register_uri_handler(_httpServer, &api_config_uri);
-        httpd_register_uri_handler(_httpServer, &api_config_post_uri);
-        httpd_register_uri_handler(_httpServer, &api_stats_uri);
-        httpd_register_uri_handler(_httpServer, &api_rogue_uri);
-        httpd_register_uri_handler(_httpServer, &api_files_uri);
-        ESP_LOGI(TAG, "HTTP server started with API endpoints");
-    } else {
-        ESP_LOGW(TAG, "HTTP server failed");
-    }
+    getWebManager().start();
 }
 
 static void configModeTask(void* param) {
@@ -1627,7 +1190,6 @@ void startConfigMode() {
     // Only init if not already done - handle case where event loop exists
     // Note: netif_initialized is shared with startRogue
     static bool netif_initialized = false;
-    static bool ap_netif_created = false;
     if (!netif_initialized) {
         esp_err_t err = esp_netif_init();
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
@@ -1651,12 +1213,10 @@ void startConfigMode() {
     if (!_ap_netif_handle) {
         _ap_netif_handle = esp_netif_create_default_wifi_ap();
         if (_ap_netif_handle) {
-            ap_netif_created = true;
             ESP_LOGI(TAG, "AP netif created for CONFIG");
         }
     } else {
         ESP_LOGI(TAG, "Using existing AP netif for CONFIG");
-        ap_netif_created = true;
     }
     
     // Re-init WiFi to ensure clean state
@@ -1721,10 +1281,7 @@ void stopConfigMode() {
         _configTaskHandle = nullptr;
     }
     
-    if (_httpServer) {
-        httpd_stop(_httpServer);
-        _httpServer = nullptr;
-    }
+    getWebManager().stop();
     
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(100));

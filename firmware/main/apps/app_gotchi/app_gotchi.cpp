@@ -16,6 +16,7 @@
 #include <assets/assets.h>
 #include <gotchi/gotchi.h>
 #include <gotchi/storage.h>
+#include <gotchi/mode.h>
 
 using namespace mooncake;
 using namespace stackchan;
@@ -265,39 +266,11 @@ void AppGotchi::handleInput() {
 }
 
 void AppGotchi::cycleMode() {
-    switch (_currentMode) {
-        case gotchi::Mode::SCOUT:
-            _currentMode = gotchi::Mode::HUNT;
-            break;
-        case gotchi::Mode::HUNT:
-            _currentMode = gotchi::Mode::WARDIVE;
-            break;
-        case gotchi::Mode::WARDIVE:
-            _currentMode = gotchi::Mode::SPECTRUM;
-            break;
-        case gotchi::Mode::SPECTRUM:
-            _currentMode = gotchi::Mode::BLE_SCAN;
-            break;
-        case gotchi::Mode::BLE_SCAN:
-            _currentMode = gotchi::Mode::ROGUE;
-            break;
-        case gotchi::Mode::ROGUE:
-            _currentMode = gotchi::Mode::STATS;
-            break;
-        case gotchi::Mode::STATS:
-            _currentMode = gotchi::Mode::IDLE;
-            break;
-        case gotchi::Mode::IDLE:
-            _currentMode = gotchi::Mode::SCOUT;
-            break;
-        case gotchi::Mode::CONFIG:
-            _currentMode = gotchi::Mode::SCOUT;
-            break;
-    }
-
+    _currentMode = gotchi::getModeInfo(_currentMode).nextMode;
+    
     gotchi::setMode(_currentMode);
-
-    // Show mode in speech bubble
+    gotchi::onModeEnter(_currentMode);
+    
     const char* modeName = gotchi::getModeName(_currentMode);
     bool showedSpecialMessage = false;
 
@@ -321,17 +294,10 @@ void AppGotchi::cycleMode() {
     }
 
     // Play different tone for each mode (bypasses xiaozhi AudioService to avoid WiFi conflict)
-    uint16_t tone_freq = 600;
-    switch (_currentMode) {
-        case gotchi::Mode::HUNT: tone_freq = 600; break;   // Low beep
-        case gotchi::Mode::SCOUT: tone_freq = 800; break;   // Mid beep
-        case gotchi::Mode::WARDIVE: tone_freq = 1000; break; // Higher beep
-        case gotchi::Mode::SPECTRUM: tone_freq = 1200; break; // Highest beep
-        
-        case gotchi::Mode::ROGUE: tone_freq = 350; break;   // Warning lower tone
-        default: tone_freq = 400; break;  // IDLE - very low
+    uint16_t tone_freq = gotchi::getModeInfo(_currentMode).toneFreq;
+    if (tone_freq > 0) {
+        hal_bridge::app_play_tone(tone_freq, 100);
     }
-    hal_bridge::app_play_tone(tone_freq, 100);
 
     // Only show mode name if no special message was shown
     if (!showedSpecialMessage && GetStackChan().hasAvatar()) {
@@ -341,72 +307,13 @@ void AppGotchi::cycleMode() {
 }
 
 void AppGotchi::cycleModeBackward() {
-    switch (_currentMode) {
-        case gotchi::Mode::HUNT:
-            _currentMode = gotchi::Mode::SCOUT;
-            break;
-        case gotchi::Mode::SCOUT:
-            _currentMode = gotchi::Mode::IDLE;
-            break;
-        case gotchi::Mode::IDLE:
-            _currentMode = gotchi::Mode::STATS;
-            break;
-        case gotchi::Mode::STATS:
-            _currentMode = gotchi::Mode::ROGUE;
-            break;
-        case gotchi::Mode::ROGUE:
-            _currentMode = gotchi::Mode::BLE_SCAN;
-            break;
-        case gotchi::Mode::BLE_SCAN:
-            _currentMode = gotchi::Mode::SPECTRUM;
-            break;
-        case gotchi::Mode::SPECTRUM:
-            _currentMode = gotchi::Mode::WARDIVE;
-            break;
-        case gotchi::Mode::WARDIVE:
-            _currentMode = gotchi::Mode::HUNT;
-            break;
-        default:
-            _currentMode = gotchi::Mode::SCOUT;
-            break;
-    }
-
+    _currentMode = gotchi::getModeInfo(_currentMode).prevMode;
+    
     gotchi::setMode(_currentMode);
-
+    gotchi::onModeEnter(_currentMode);
+    
     const char* modeName = gotchi::getModeName(_currentMode);
-    bool showedSpecialMessage = false;
-
-    // Show "OK" disclaimer when first entering HUNT mode (from backward too)
-    if (_currentMode == gotchi::Mode::HUNT && gotchi::shouldShowHuntDisclaimer()) {
-        gotchi::acknowledgeHuntDisclaimer();
-        if (GetStackChan().hasAvatar()) {
-            GetStackChan().avatar().setSpeech("HUNT Mode!\nSends deauth frames.\nOK to proceed?");
-            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(4000, 180, true));
-        }
-        showedSpecialMessage = true;
-    }
-
-    // Show educational warning for ROGUE mode (from backward too)
-    if (!showedSpecialMessage && _currentMode == gotchi::Mode::ROGUE) {
-        if (GetStackChan().hasAvatar()) {
-            GetStackChan().avatar().setSpeech("EDUCATIONAL!\nOwn networks only!");
-            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(3000, 180, true));
-        }
-        showedSpecialMessage = true;
-    }
-
-    uint16_t tone_freq = 600;
-    switch (_currentMode) {
-        case gotchi::Mode::HUNT: tone_freq = 600; break;
-        case gotchi::Mode::SCOUT: tone_freq = 800; break;
-        case gotchi::Mode::WARDIVE: tone_freq = 1000; break;
-        case gotchi::Mode::SPECTRUM: tone_freq = 1200; break;
-        case gotchi::Mode::ROGUE: tone_freq = 350; break;
-        default: tone_freq = 400; break;
-    }
-    hal_bridge::app_play_tone(tone_freq, 100);
-
-    if (!showedSpecialMessage && GetStackChan().hasAvatar()) {
+    if (GetStackChan().hasAvatar()) {
         GetStackChan().avatar().setSpeech(modeName);
         GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(1500, 180, true));
     }
@@ -419,37 +326,7 @@ void AppGotchi::updateAvatar() {
     auto& avatar = GetStackChan().avatar();
 
     // Mode-specific base emotion with mood override
-    avatar::Emotion baseEmotion = avatar::Emotion::Neutral;
-    
-    switch (_currentMode) {
-        case gotchi::Mode::HUNT:
-            baseEmotion = avatar::Emotion::Doubt;  // Scanning/alert
-            break;
-        case gotchi::Mode::SCOUT:
-            baseEmotion = avatar::Emotion::Happy;   // Exploring/curious
-            break;
-        case gotchi::Mode::WARDIVE:
-            baseEmotion = avatar::Emotion::Angry;   // Intense/active
-            break;
-        case gotchi::Mode::SPECTRUM:
-            baseEmotion = avatar::Emotion::Doubt;   // Analyzing
-            break;
-        case gotchi::Mode::BLE_SCAN:
-            baseEmotion = avatar::Emotion::Doubt;   // BLE scanning
-            break;
-        case gotchi::Mode::ROGUE:
-            baseEmotion = avatar::Emotion::Angry;   // Active attack - warning
-            break;
-        case gotchi::Mode::STATS:
-            baseEmotion = avatar::Emotion::Happy;   // Viewing stats
-            break;
-        case gotchi::Mode::IDLE:
-            baseEmotion = avatar::Emotion::Neutral;
-            break;
-        case gotchi::Mode::CONFIG:
-            baseEmotion = avatar::Emotion::Neutral;  // Config mode - neutral
-            break;
-    }
+    avatar::Emotion baseEmotion = (avatar::Emotion)gotchi::getModeAvatarEmotion(_currentMode);
     
     // Mood override
     switch (mood) {
@@ -479,43 +356,9 @@ void AppGotchi::updateHeadAnimation() {
     uint32_t now = GetHAL().millis();
     auto& motion = GetStackChan().motion();
 
-    static const uint32_t IDLE_INTERVAL = 3000;
-    static const uint32_t HUNT_INTERVAL = 800;
-    static const uint32_t SCOUT_INTERVAL = 1500;
-
-    uint32_t interval = IDLE_INTERVAL;
-    int16_t baseYaw = 0;
-    int16_t basePitch = 200;
-
-    switch (_currentMode) {
-        case gotchi::Mode::HUNT:
-            interval = HUNT_INTERVAL;
-            break;
-        case gotchi::Mode::SCOUT:
-            interval = SCOUT_INTERVAL;
-            basePitch = 150;
-            break;
-        case gotchi::Mode::WARDIVE:
-            interval = 600;
-            baseYaw = (now / interval) % 2 ? 300 : -300;
-            break;
-        case gotchi::Mode::SPECTRUM:
-            interval = 1000;
-            baseYaw = (int16_t)((now / interval) % 6 - 3) * 150;
-            break;
-        case gotchi::Mode::BLE_SCAN:
-            interval = 600;
-            break;
-        case gotchi::Mode::ROGUE:
-            interval = 500;
-            baseYaw = (int16_t)((now / 250 % 4) - 2) * 120;
-            break;
-        case gotchi::Mode::STATS:
-            interval = 2000;  // Slow movement while viewing stats
-            break;
-        default:
-            break;
-    }
+    uint32_t interval = gotchi::getModeHeadMoveInterval(_currentMode);
+    int16_t baseYaw = gotchi::getModeHeadYaw(_currentMode, now, interval);
+    int16_t basePitch = gotchi::getModeHeadPitch(_currentMode);
 
     bool targetChanged = false;
 
@@ -602,146 +445,10 @@ void AppGotchi::updateNeonLights() {
         return;
     }
     
-    // Dynamic blink speed based on network count
-    int blinkSpeed = 400;  // base speed
-    if (netCount > 10) blinkSpeed = 150;      // Very fast when many networks
-    else if (netCount > 5) blinkSpeed = 250;  // Fast
-    else if (netCount > 2) blinkSpeed = 350;  // Medium
-    else blinkSpeed = 500;  // Slow
-    
-    bool blinkOn = (now / blinkSpeed) % 2;
-
-    switch (_currentMode) {
-        case gotchi::Mode::IDLE:
-            // Gentle pulse - slow breathing effect
-            if ((now / 1000) % 2) {
-                leftLight.setColor(0x00, 0xAA, 0x66);
-                rightLight.setColor(0x00, 0xAA, 0x66);
-            } else {
-                leftLight.setColor(0x00, 0x66, 0x33);
-                rightLight.setColor(0x00, 0x66, 0x33);
-            }
-            break;
-
-        case gotchi::Mode::HUNT:
-            // Dynamic colors based on network count
-            if (netCount >= 10) {
-                // EXCITED - lots of networks!
-                if (blinkOn) {
-                    leftLight.setColor(0x00, 0xFF, 0x00);  // Bright green
-                    rightLight.setColor(0xFF, 0xFF, 0x00); // Yellow
-                } else {
-                    leftLight.setColor(0x00, 0x88, 0x00);
-                    rightLight.setColor(0x88, 0x88, 0x00);
-                }
-            } else if (netCount >= 5) {
-                // HAPPY - good number of networks
-                if (blinkOn) {
-                    leftLight.setColor(0x00, 0xFF, 0x88);  // Green
-                    rightLight.setColor(0x00, 0xFF, 0xFF);  // Cyan
-                } else {
-                    leftLight.setColor(0x00, 0xAA, 0x55);
-                    rightLight.setColor(0x00, 0xAA, 0xAA);
-                }
-            } else {
-                // CALM - few networks
-                if (blinkOn) {
-                    leftLight.setColor(0x00, 0x88, 0x44);  // Dim green
-                    rightLight.setColor(0x00, 0x88, 0x88); // Dim cyan
-                } else {
-                    leftLight.setColor(0x00, 0x44, 0x22);
-                    rightLight.setColor(0x00, 0x44, 0x44);
-                }
-            }
-            break;
-
-        case gotchi::Mode::SCOUT:
-            // Blue pulse - exploring
-            if (blinkOn) {
-                leftLight.setColor(0x00, 0x66, 0xFF);
-                rightLight.setColor(0x00, 0x66, 0xFF);
-            } else {
-                leftLight.setColor(0x00, 0x33, 0x88);
-                rightLight.setColor(0x00, 0x33, 0x88);
-            }
-            break;
-
-        case gotchi::Mode::WARDIVE:
-            if ((now / 150) % 2) {
-                leftLight.setColor(0xFF, 0x66, 0x00);
-                rightLight.setColor(0xFF, 0x66, 0x00);
-            } else {
-                leftLight.setColor(0x88, 0x33, 0x00);
-                rightLight.setColor(0x88, 0x33, 0x00);
-            }
-            break;
-
-        case gotchi::Mode::SPECTRUM: {
-            uint8_t phase = (now / 100) % 6;
-            if (phase < 3) {
-                leftLight.setColor(0xFF, 0x00 << (phase * 2), 0xFF);
-                rightLight.setColor(0xFF, 0x00 << ((phase + 1) * 2), 0xFF);
-            } else {
-                leftLight.setColor(0x00, 0xFF, 0x00);
-                rightLight.setColor(0x00, 0x00, 0xFF);
-            }
-            break;
-        }
-
-        case gotchi::Mode::BLE_SCAN: {
-            // Blue/Magenta pulse - BLE scanning
-            if (blinkOn) {
-                leftLight.setColor(0x00, 0x88, 0xFF);
-                rightLight.setColor(0x88, 0x00, 0xFF);
-            } else {
-                leftLight.setColor(0x00, 0x44, 0x88);
-                rightLight.setColor(0x44, 0x00, 0x88);
-            }
-            break;
-        }
-
-        case gotchi::Mode::STATS: {
-            // Purple/White pulse - viewing stats
-            if (blinkOn) {
-                leftLight.setColor(0xAA, 0x00, 0xFF);
-                rightLight.setColor(0xFF, 0xFF, 0xFF);
-            } else {
-                leftLight.setColor(0x55, 0x00, 0x88);
-                rightLight.setColor(0x88, 0x88, 0x88);
-            }
-            break;
-        }
-
-        case gotchi::Mode::ROGUE: {
-            // Yellow/Orange fast pulse - beacon spam active
-            uint8_t flashPhase = (now / 80) % 4;
-            if (flashPhase < 2) {
-                leftLight.setColor(0xFF, 0xAA, 0x00);
-                rightLight.setColor(0xFF, 0x88, 0x00);
-            } else {
-                leftLight.setColor(0xAA, 0x55, 0x00);
-                rightLight.setColor(0xAA, 0x44, 0x00);
-            }
-            break;
-        }
-
-        case gotchi::Mode::CONFIG: {
-            // White/Cyan slow pulse - config mode
-            if (blinkOn) {
-                leftLight.setColor(0xAA, 0xFF, 0xFF);
-                rightLight.setColor(0xFF, 0xFF, 0xFF);
-            } else {
-                leftLight.setColor(0x55, 0xAA, 0xAA);
-                rightLight.setColor(0x88, 0x88, 0x88);
-            }
-            break;
-        }
-
-        default:
-            leftLight.setColor(0x00, 0xFF, 0x88);
-            rightLight.setColor(0x00, 0xFF, 0x88);
-            break;
-    }
+// Use centralized mode-based neon color system
+    gotchi::NeonColor nc = gotchi::getNeonColor(_currentMode, netCount, now);
+    leftLight.setColor(nc.r, nc.g, nc.b);
+    rightLight.setColor(nc.r, nc.g, nc.b);
 }
 
 static const char* getSignalBars(int rssi) {
@@ -771,9 +478,8 @@ void AppGotchi::renderUI() {
         }
     }
     
-    // Get handshake count
+    // Get handshake count (for potential future display)
     int hsCount = gotchi::getHandshakeCount();
-    const char* hsIcon = hsCount > 0 ? "#" : "o";
     
     // GPS info display - show coordinates in WARDIVE mode, satellite count otherwise
     const char* gpsDisplay = "No GPS";
@@ -1166,15 +872,14 @@ void AppGotchi::renderUI() {
         _networkListLabel->setText("[W] Scanning for networks...");
     }
     
-    // Idle dialogue - random quirky phrases in all active modes (except ROGUE)
-    if (_currentMode == gotchi::Mode::HUNT || _currentMode == gotchi::Mode::SCOUT ||
-        _currentMode == gotchi::Mode::WARDIVE || _currentMode == gotchi::Mode::SPECTRUM ||
-        _currentMode == gotchi::Mode::BLE_SCAN) {
+    // Idle dialogue - use mode-specific phrases based on ModeInfo
+    if (gotchi::isDialogueEnabled(_currentMode)) {
+        uint32_t interval = gotchi::getModeDialogueInterval(_currentMode);
         uint32_t now = GetHAL().millis();
-        if (now - _lastIdleSpeak > 5000 && _idleDialogue.shouldSpeak(now)) {
+        if (interval > 0 && now - _lastIdleSpeak > interval && _idleDialogue.shouldSpeak(now)) {
             _lastIdleSpeak = now;
             if (GetStackChan().hasAvatar()) {
-                const char* phrase = _idleDialogue.getRandomPhrase(networks, stats.xp, stats.level, true);
+                const char* phrase = _idleDialogue.getModeSpecificPhrase(_currentMode);
                 GetStackChan().avatar().setSpeech(phrase);
                 GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(2500, 180, true));
             }

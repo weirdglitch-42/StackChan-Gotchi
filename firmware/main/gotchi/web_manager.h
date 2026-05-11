@@ -30,6 +30,8 @@ private:
     static esp_err_t apiConfigHandler(httpd_req_t* req);
     static esp_err_t apiStatsHandler(httpd_req_t* req);
     static esp_err_t apiRogueHandler(httpd_req_t* req);
+    static esp_err_t apiRogueNetworksHandler(httpd_req_t* req);
+    static esp_err_t apiRogueSetTargetHandler(httpd_req_t* req);
     static esp_err_t apiFilesHandler(httpd_req_t* req);
     static esp_err_t apiWigleHandler(httpd_req_t* req);
     static esp_err_t apiPwnagotchiHandler(httpd_req_t* req);
