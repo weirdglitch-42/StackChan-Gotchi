@@ -18,6 +18,7 @@
 #include <gotchi/gotchi.h>
 #include <gotchi/storage.h>
 #include <gotchi/mode.h>
+#include <gotchi/rogue_manager.h>
 
 using namespace mooncake;
 using namespace stackchan;
@@ -737,20 +738,20 @@ void AppGotchi::renderUI() {
         uint8_t targetCh = rogue.getTargetChannel();
         bool isRunning = rogue.isActive();
         
-        char rogueDisplay[400];
-        const char* statusStr = isRunning ? "● Broadcasting" : "○ Stopped";
+        char rogueDisplay[600];
+        const char* statusStr = isRunning ? "Broadcasting" : "Stopped";
         
         snprintf(rogueDisplay, sizeof(rogueDisplay),
-            "═══════════════════════════════════════════\n"
-            "   ⚠️  WARNING - EDUCATIONAL USE ONLY  ⚠️  \n"
-            "═══════════════════════════════════════════\n"
+            "===============================================\n"
+            "   WARNING - EDUCATIONAL USE ONLY\n"
+            "===============================================\n"
             "Target SSID:  %s\n"
             "Target CH:    %d\n"
             "Status:       %s\n"
-            "──────────────────────────────────────────\n"
+            "-----------------------------------------------\n"
             "Demo of rogue AP / evil twin attack vectors\n"
             "   Only test on networks YOU own!\n"
-            "═══════════════════════════════════════════",
+            "===============================================",
             targetSSID, (int)targetCh, statusStr);
         
         _networkListLabel->setText(rogueDisplay);
