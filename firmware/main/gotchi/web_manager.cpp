@@ -33,6 +33,7 @@ void WebManager::start() {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.stack_size = 4096;
+    config.max_uri_handlers = 16;  // Increase from default 8 to handle all endpoints
     
     httpd_uri_t rootUri = {"/", HTTP_GET, rootHandler, nullptr};
     httpd_uri_t apiConfigUri = {"/api/config", HTTP_GET, apiConfigHandler, nullptr};
@@ -516,7 +517,7 @@ esp_err_t WebManager::apiPermissionsHandler(httpd_req_t* req) {
     GotchiConfig cfg = gotchi::getConfig();
     cfg.huntEnabled = huntEnabled;
     cfg.rogueEnabled = rogueEnabled;
-    gotchi::saveConfig(cfg);
+    gotchi::updateConfig(cfg);
     
     ESP_LOGI(TAG, "Permissions saved: hunt=%d, rogue=%d", huntEnabled, rogueEnabled);
     

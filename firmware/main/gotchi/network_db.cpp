@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "network_db.h"
+#include "storage.h"
 #include <esp_log.h>
 #include <nvs_flash.h>
 #include <string.h>
@@ -176,7 +177,15 @@ void NetworkDatabase::loadFromNVS() {
     }
     
     nvs_close(nvs);
-    ESP_LOGI(TAG, "Loaded from NVS: NetworksFound=%u", (unsigned)_networksFound);
+    
+    int loaded = loadNetworks(_networks);
+    if (loaded > 0) {
+        ESP_LOGI(TAG, "Loaded from NVS: NetworksFound=%u, StoredNetworks=%d", 
+            (unsigned)_networksFound, loaded);
+    } else {
+        ESP_LOGI(TAG, "Loaded from NVS: NetworksFound=%u (no stored networks)", 
+            (unsigned)_networksFound);
+    }
 }
 
 void NetworkDatabase::saveToNVS() {
@@ -191,6 +200,8 @@ void NetworkDatabase::saveToNVS() {
     nvs_set_u32(nvs, "netscnt", (uint32_t)_networks.size());
     nvs_commit(nvs);
     nvs_close(nvs);
+    
+    saveNetworks(_networks);
     
     ESP_LOGI(TAG, "Saved to NVS: NetworksFound=%u, Networks=%u", 
         (unsigned)_networksFound, (unsigned)_networks.size());

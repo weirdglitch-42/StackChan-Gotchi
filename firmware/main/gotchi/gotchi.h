@@ -153,6 +153,7 @@ Mood getCurrentMood();
 //=============================================================================
 Stats getStats();
 GotchiConfig getConfig();
+void updateConfig(const GotchiConfig& config);
 void addXP(int32_t amount);
 const char* getLevelTitle(int level);
 const char* getCurrentLevelTitle();

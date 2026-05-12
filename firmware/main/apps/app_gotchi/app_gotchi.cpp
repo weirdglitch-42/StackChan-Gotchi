@@ -766,7 +766,7 @@ void AppGotchi::renderUI() {
     // ROGUE mode - enhanced display with real data
     else if (_currentMode == gotchi::Mode::ROGUE) {
         _networkListLabel->setSize(320, 180);
-        _networkListLabel->align(LV_ALIGN_BOTTOM_MID, 0, -5);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_MID, 0, 5);
         _networkListLabel->setBgColor(lv_color_hex(0x1A0A00));  // Dark orange bg
         _networkListLabel->setTextColor(lv_color_hex(0xFFCC66));  // Orange text
         
@@ -807,7 +807,7 @@ void AppGotchi::renderUI() {
     // CONFIG mode - show config UI
     else if (_currentMode == gotchi::Mode::CONFIG) {
         _networkListLabel->setSize(300, 50);
-        _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, -5);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_LEFT, 5, 5);
         _networkListLabel->setBgColor(lv_color_hex(0x002222));
         _networkListLabel->setTextColor(lv_color_hex(0x88AAAA));
         _networkListLabel->setText("CONFIG MODE\n"
@@ -822,7 +822,7 @@ void AppGotchi::renderUI() {
     // STATS mode - full screen stats display
     else if (_currentMode == gotchi::Mode::STATS) {
         // Full screen stats display - reduced height to fit 14 lines
-        _networkListLabel->setSize(310, 190);
+        _networkListLabel->setSize(310, 200);
         _networkListLabel->align(LV_ALIGN_TOP_LEFT, 5, 25);
         _networkListLabel->setBgColor(lv_color_hex(0x1A0A1A));  // Dark purple bg
         _networkListLabel->setTextColor(lv_color_hex(0xDD88DD));  // Purple text
@@ -840,18 +840,19 @@ void AppGotchi::renderUI() {
         const char* titleStr = stats.levelTitle ? stats.levelTitle : "Unknown";
         
         snprintf(statsDisplay, sizeof(statsDisplay),
-            "============== STATS ===============\n"
+            "=============== STATS ================\n"
             "%s (%d)%s | XP:%d/%d (%d%%)\n"
-            "----------------------------------------------\n"
+            "----------------------------------------------------------\n"
             "DISCOVERY:\n"
             "Nets:%u HS:%u BLE:%u CH:%u\n"
-            "----------------------------------------------\n"
+            "----------------------------------------------------------\n"
             "PROGRESS:\n"
             "Session:+%d XP (%dm)\n"
             "Achieve:%u/37 (+%d XP)\n"
-            "-----------------------------------------------\n"
+            "-----------------------------------------------------------\n"
             "SYSTEM:\n"
-            "Up:%dh%dm Heap:%d\n - GPS:%s (%dsat)",
+            "Up:%dh%dm Heap:%d\n"
+            "GPS:%s (%dsat)",
             titleStr, (int)stats.level, prestigeStr,
             (int)stats.xp, (int)stats.xpToNextLevel, (int)stats.progressPercent,
             (unsigned)stats.networksFound,

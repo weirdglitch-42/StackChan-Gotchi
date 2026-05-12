@@ -34,6 +34,7 @@ static int32_t _minHeapSession = 0;
 static bool _huntDisclaimerShown = false;
 static uint16_t _lastTrackedChannels = 0;
 static int _lastTrackedBLECount = 0;
+static uint32_t _lastNetworkSaveTime = 0;
 
 static GotchiConfig _config;
 
@@ -78,28 +79,6 @@ float getXPMultiplier() {
     return getXPSystem().getXPMultiplier();
 }
 
-static void loadFromNVS() {
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open("gotchi", NVS_READONLY, &nvs);
-    if (err != ESP_OK) {
-        ESP_LOGI(TAG, "No saved data, starting fresh");
-        return;
-    }
-    
-    int32_t savedXP = 0;
-    if (nvs_get_i32(nvs, "xp", &savedXP) == ESP_OK) {
-        getXPSystem().addXP(savedXP);
-    }
-    
-    nvs_close(nvs);
-    ESP_LOGI(TAG, "Loaded from NVS: XP=%d, Level=%d", 
-        (int)getXPSystem().getXP(), (int)getXPSystem().getLevel());
-    
-    getXPSystem().loadFromNVS();
-    getAchievementSystem().loadFromNVS();
-    getNetworkDatabase().loadFromNVS();
-}
-
 static void saveToNVS() {
     nvs_handle_t nvs;
     esp_err_t err = nvs_open("gotchi", NVS_READWRITE, &nvs);
@@ -136,7 +115,9 @@ void init() {
         ESP_LOGE(TAG, "NVS flash init failed: %d", ret);
     }
 
-    loadFromNVS();
+    // Load XP and achievements from NVS (doesn't require storage)
+    getXPSystem().loadFromNVS();
+    getAchievementSystem().loadFromNVS();
     
     getXPSystem().init();
     getAchievementSystem().init();
@@ -147,10 +128,15 @@ void init() {
     // Handshake capture handled via getHandshakes() in app_gotchi
 
     if (initStorage()) {
+        // Load networks from storage (requires storage to be initialized first)
+        getNetworkDatabase().loadFromNVS();
+        
         if (loadConfig(_config)) {
-            ESP_LOGI(TAG, "Config loaded");
+            ESP_LOGI(TAG, "Config loaded from file");
+        } else {
+            ESP_LOGI(TAG, "No config file or parse error - using defaults and saving");
+            updateConfig(_config);
         }
-        saveConfig(_config);
     }
 
     _startTime = GetHAL().millis();
@@ -204,6 +190,15 @@ void update() {
         _lastTrackedBLECount = currentBLEDevices;
         addXP(newDevices * 2);
         ESP_LOGI(TAG, "New BLE device(s)! Awarded %d XP", newDevices * 2);
+    }
+    
+    // Save networks periodically (every 60 seconds) if storage available
+    if (hasStorage() && getNetworkDatabase().getNetworkCount() > 0) {
+        if (_lastNetworkSaveTime == 0) _lastNetworkSaveTime = now;
+        if (now - _lastNetworkSaveTime > 60000) {
+            getNetworkDatabase().saveToNVS();
+            _lastNetworkSaveTime = now;
+        }
     }
 }
 
@@ -293,6 +288,18 @@ Stats getStats() {
 
 GotchiConfig getConfig() {
     return _config;
+}
+
+void updateConfig(const GotchiConfig& config) {
+    _config = config;
+    ESP_LOGI(TAG, "updateConfig: huntEnabled=%d, rogueEnabled=%d", config.huntEnabled, config.rogueEnabled);
+    if (hasStorage()) {
+        ESP_LOGI(TAG, "Storage available, saving config...");
+        bool result = saveConfig(_config);
+        ESP_LOGI(TAG, "Config save result: %s", result ? "OK" : "FAILED");
+    } else {
+        ESP_LOGW(TAG, "No storage - config not persisted!");
+    }
 }
 
 void addXP(int32_t amount) {

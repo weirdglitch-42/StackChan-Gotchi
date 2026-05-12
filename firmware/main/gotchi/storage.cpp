@@ -178,7 +178,8 @@ bool loadConfig(GotchiConfig& config) {
     free(jsonBuffer);
     
     if (error) {
-        ESP_LOGW(TAG, "Config JSON parse failed: %s", error.c_str());
+        ESP_LOGW(TAG, "Config JSON parse failed: %s - deleting corrupted file", error.c_str());
+        unlink(path);
         return false;
     }
     
@@ -288,22 +289,32 @@ bool saveNetworks(const std::vector<NetworkInfo>& networks) {
     char path[128];
     snprintf(path, sizeof(path), "%s/networks.json", MOUNT_POINT);
     
+    ArduinoJson::JsonDocument doc;
+    ArduinoJson::JsonArray arr = doc.add<ArduinoJson::JsonArray>();
+    
+    for (size_t i = 0; i < networks.size() && i < 200; i++) {
+        ArduinoJson::JsonObject obj = arr.add<ArduinoJson::JsonObject>();
+        obj["ssid"] = networks[i].ssid;
+        
+        char bssidStr[18];
+        snprintf(bssidStr, sizeof(bssidStr), "%02x%02x%02x%02x%02x%02x",
+            networks[i].bssid[0], networks[i].bssid[1], networks[i].bssid[2],
+            networks[i].bssid[3], networks[i].bssid[4], networks[i].bssid[5]);
+        obj["bssid"] = bssidStr;
+        obj["rssi"] = networks[i].rssi;
+        obj["channel"] = networks[i].channel;
+    }
+    
+    std::string jsonStr;
+    ArduinoJson::serializeJson(doc, jsonStr);
+    
     FILE* f = fopen(path, "w");
     if (!f) return false;
     
-    fprintf(f, "[\n");
-    for (size_t i = 0; i < networks.size(); i++) {
-        fprintf(f, "  {\"ssid\": \"%s\", \"bssid\": \"%02x:%02x:%02x:%02x:%02x:%02x\", \"rssi\": %d, \"channel\": %d}",
-            networks[i].ssid,
-            networks[i].bssid[0], networks[i].bssid[1], networks[i].bssid[2],
-            networks[i].bssid[3], networks[i].bssid[4], networks[i].bssid[5],
-            (int)networks[i].rssi, (int)networks[i].channel);
-        if (i < networks.size() - 1) fprintf(f, ",");
-        fprintf(f, "\n");
-    }
-    fprintf(f, "]\n");
-    
+    fprintf(f, "%s", jsonStr.c_str());
     fclose(f);
+    
+    ESP_LOGI(TAG, "Saved %d networks to storage", (int)networks.size());
     return true;
 }
 
@@ -316,23 +327,68 @@ int loadNetworks(std::vector<NetworkInfo>& networks) {
     FILE* f = fopen(path, "r");
     if (!f) return 0;
     
-    networks.clear();
-    NetworkInfo net;
-    int matched = fscanf(f, "{\"ssid\": \"%[^\"]\", \"bssid\": \"%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx\", \"rssi\": %hhd, \"channel\": %hhu}",
-        net.ssid, &net.bssid[0], &net.bssid[1], &net.bssid[2], &net.bssid[3], &net.bssid[4], &net.bssid[5],
-        &net.rssi, &net.channel);
+    fseek(f, 0, SEEK_END);
+    long fileSize = ftell(f);
+    fseek(f, 0, SEEK_SET);
     
-    while (matched == 9) {
+    if (fileSize <= 0) {
+        fclose(f);
+        return 0;
+    }
+    
+    char* jsonBuffer = (char*)malloc(fileSize + 1);
+    if (!jsonBuffer) {
+        fclose(f);
+        return 0;
+    }
+    
+    size_t bytesRead = fread(jsonBuffer, 1, fileSize, f);
+    jsonBuffer[bytesRead] = '\0';
+    fclose(f);
+    
+    ArduinoJson::JsonDocument doc;
+    ArduinoJson::DeserializationError error = ArduinoJson::deserializeJson(doc, jsonBuffer);
+    free(jsonBuffer);
+    
+    if (error) {
+        ESP_LOGW(TAG, "Networks JSON parse failed: %s", error.c_str());
+        unlink(path);
+        return 0;
+    }
+    
+    networks.clear();
+    
+    if (!doc.is<ArduinoJson::JsonArray>()) {
+        ESP_LOGW(TAG, "Invalid networks JSON format");
+        return 0;
+    }
+    
+    ArduinoJson::JsonArray arr = doc.as<ArduinoJson::JsonArray>();
+    for (auto obj : arr) {
+        NetworkInfo net;
+        memset(net.ssid, 0, 33);
+        
+        if (obj["ssid"].is<const char*>()) {
+            strncpy(net.ssid, obj["ssid"].as<const char*>(), 32);
+        }
+        
+        if (obj["bssid"].is<const char*>()) {
+            const char* bssidStr = obj["bssid"].as<const char*>();
+            sscanf(bssidStr, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
+                &net.bssid[0], &net.bssid[1], &net.bssid[2],
+                &net.bssid[3], &net.bssid[4], &net.bssid[5]);
+        }
+        
+        net.rssi = obj["rssi"].is<int>() ? obj["rssi"].as<int>() : -100;
+        net.channel = obj["channel"].is<int>() ? obj["channel"].as<uint8_t>() : 1;
         net.isHidden = false;
         net.hasCapture = false;
         net.lastSeen = 0;
+        
         networks.push_back(net);
-        matched = fscanf(f, "{\"ssid\": \"%[^\"]\", \"bssid\": \"%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx\", \"rssi\": %hhd, \"channel\": %hhu}",
-            net.ssid, &net.bssid[0], &net.bssid[1], &net.bssid[2], &net.bssid[3], &net.bssid[4], &net.bssid[5],
-            &net.rssi, &net.channel);
     }
     
-    fclose(f);
+    ESP_LOGI(TAG, "Loaded %d networks from storage", (int)networks.size());
     return networks.size();
 }
 
