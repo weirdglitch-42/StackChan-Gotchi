@@ -37,6 +37,7 @@ A **pwnagotchi-style WiFi/BLE reconnaissance companion** for M5Stack CoreS3 robo
   - Levels 17-24: Cortex, Nexus, Matrix, Quantum, Singularity, Hyperion, Archon, Titan
   - Levels 25-32: Prime, Alpha, Omega Prime, Supreme, Transcendent, Paramount, Glorious, Eternal
   - Levels 33-39: Legendary, Mythic, Omnipotent, Infinite, Absolute, Ultimate, Paramount
+  - **Level 40: Enigma** (hints at secrets)
   - **Secret levels** exist beyond level 40...
 - Prestige system: Reset to level 1, keep prestige count, +10% XP bonus per prestige level
 - 37 achievements with XP rewards (hybrid system)
