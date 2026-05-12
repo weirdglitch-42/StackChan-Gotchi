@@ -481,6 +481,22 @@ static const char* getSignalBars(int rssi) {
     return "_";
 }
 
+void AppGotchi::renderIdleDialogue() {
+    if (gotchi::isDialogueEnabled(_currentMode)) {
+        uint32_t interval = gotchi::getModeDialogueInterval(_currentMode);
+        uint32_t now = GetHAL().millis();
+        if (interval > 0 && now - _lastIdleSpeak > interval) {
+            _lastIdleSpeak = now;
+            if (GetStackChan().hasAvatar()) {
+                const char* phrase = _idleDialogue.getModeSpecificPhrase(_currentMode);
+                GetStackChan().avatar().setSpeech(phrase);
+                GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(2500, 180, true));
+                mclog::tagInfo(getAppInfo().name, "Idle phrase: %s", phrase);
+            }
+        }
+    }
+}
+
 void AppGotchi::renderUI() {
     auto stats = gotchi::getStats();
     auto networks = gotchi::getNetworks();
@@ -612,6 +628,7 @@ void AppGotchi::renderUI() {
         _networkListLabel->setBgColor(lv_color_hex(0x001a00));  // Dark green bg
         _networkListLabel->setTextColor(lv_color_hex(0x66FF66));  // Green text
         _networkListLabel->setText("Robot is at rest.");
+        renderIdleDialogue();
         return;
     }
     // SCOUT mode - passive scanning (blue theme)
@@ -647,6 +664,7 @@ void AppGotchi::renderUI() {
         _networkListLabel->setText(netList);
         
         _lastNetworkCount = networks.size();
+        renderIdleDialogue();
         return;
     }
     // HUNT mode - active scanning (green theme with action)
@@ -681,6 +699,7 @@ void AppGotchi::renderUI() {
         _networkListLabel->setText(netList);
         
         _lastNetworkCount = networks.size();
+        renderIdleDialogue();
         return;
     }
     // WARDIVE mode - GPS wardriving (orange theme)
@@ -693,6 +712,7 @@ void AppGotchi::renderUI() {
         createSignalBars();
         updateSignalBars();
         _networkListLabel->setText("");
+        renderIdleDialogue();
         return;
     }
     // BLE_SCAN mode - formatted device list
@@ -727,6 +747,7 @@ void AppGotchi::renderUI() {
             strncat(bleList, "Scanning for BLE...\n", sizeof(bleList) - 1);
         }
         _networkListLabel->setText(bleList);
+        renderIdleDialogue();
         return;
     }
     // SPECTRUM mode - channel analysis (purple theme with heatmap)
@@ -739,6 +760,7 @@ void AppGotchi::renderUI() {
         createSpectrumLabels();
         updateSpectrumLabels();
         _networkListLabel->setText("");
+        renderIdleDialogue();
         return;
     }
     // ROGUE mode - enhanced display with real data
@@ -779,6 +801,7 @@ void AppGotchi::renderUI() {
                 GetStackChan().avatar().setSpeech("ROGUE\nNot running.\nSet target first.");
             }
         }
+        renderIdleDialogue();
         return;
     }
     // CONFIG mode - show config UI
@@ -793,13 +816,14 @@ void AppGotchi::renderUI() {
                                     "Or edit /sd/config.json on SD card\n"
                                     "\n"
                                     "Tap anywhere to exit");
+        renderIdleDialogue();
         return;
     }
     // STATS mode - full screen stats display
     else if (_currentMode == gotchi::Mode::STATS) {
         // Full screen stats display - reduced height to fit 14 lines
-        _networkListLabel->setSize(310, 180);
-        _networkListLabel->align(LV_ALIGN_TOP_LEFT, 5, 40);
+        _networkListLabel->setSize(310, 190);
+        _networkListLabel->align(LV_ALIGN_TOP_LEFT, 5, 25);
         _networkListLabel->setBgColor(lv_color_hex(0x1A0A1A));  // Dark purple bg
         _networkListLabel->setTextColor(lv_color_hex(0xDD88DD));  // Purple text
         
@@ -816,19 +840,18 @@ void AppGotchi::renderUI() {
         const char* titleStr = stats.levelTitle ? stats.levelTitle : "Unknown";
         
         snprintf(statsDisplay, sizeof(statsDisplay),
-            "=========== STATS ============\n"
+            "============== STATS ===============\n"
             "%s (%d)%s | XP:%d/%d (%d%%)\n"
-            "------------------------\n"
+            "----------------------------------------------\n"
             "DISCOVERY:\n"
             "Nets:%u HS:%u BLE:%u CH:%u\n"
-            "------------------------\n"
+            "----------------------------------------------\n"
             "PROGRESS:\n"
             "Session:+%d XP (%dm)\n"
             "Achieve:%u/37 (+%d XP)\n"
-            "------------------------\n"
+            "-----------------------------------------------\n"
             "SYSTEM:\n"
-            "Up:%dh%dm Heap:%d\n"
-            "GPS:%s (%dsat)",
+            "Up:%dh%dm Heap:%d\n - GPS:%s (%dsat)",
             titleStr, (int)stats.level, prestigeStr,
             (int)stats.xp, (int)stats.xpToNextLevel, (int)stats.progressPercent,
             (unsigned)stats.networksFound,

@@ -31,6 +31,7 @@ private:
     void cycleMode();
     void cycleModeBackward();
     void renderUI();
+    void renderIdleDialogue();
     void createSpectrumLabels();
     void updateSpectrumLabels();
     void destroySpectrumLabels();
