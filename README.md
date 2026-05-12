@@ -37,9 +37,9 @@ A **pwnagotchi-style WiFi/BLE reconnaissance companion** for M5Stack CoreS3 robo
   - Levels 17-24: Cortex, Nexus, Matrix, Quantum, Singularity, Hyperion, Archon, Titan
   - Levels 25-32: Prime, Alpha, Omega Prime, Supreme, Transcendent, Paramount, Glorious, Eternal
   - Levels 33-39: Legendary, Mythic, Omnipotent, Infinite, Absolute, Ultimate, Paramount
-  - **Level 40: Enigma** (hints at secrets)
-  - **Level 41: Marvin** (secret - requires prestige 1+)
-  - **Level 42: Deep Thought** (secret final level - requires prestige 2+)
+  - **Level 40: Enigma** (something lurks beyond...)
+  - **Level 41: ???** (the answer approaches...)
+  - **Level 42: ???** (the ultimate question...)
 - Prestige system: Reset to level 1, keep prestige count, +10% XP bonus per prestige level
 - 37 achievements with XP rewards (hybrid system)
 - Daily challenges with streak tracking
