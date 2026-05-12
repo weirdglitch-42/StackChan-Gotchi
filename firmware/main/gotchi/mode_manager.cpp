@@ -336,19 +336,32 @@ void ModeManager::startConfigMode() {
 }
 
 void ModeManager::stopConfigMode() {
-    if (!_configModeActive) return;
+    // Safety check: only proceed if actually in CONFIG mode
+    if (!_configModeActive || _currentMode != Mode::CONFIG) {
+        ESP_LOGW(TAG, "stopConfigMode called but not in CONFIG mode (active=%d, mode=%s)", 
+            _configModeActive, getModeName(_currentMode));
+        return;
+    }
     
     _configModeActive = false;
     
-    if (_configTaskHandle) {
-        vTaskDelay(pdMS_TO_TICKS(200));
-        if (_configTaskHandle) {
-            vTaskDelete(_configTaskHandle);
-            _configTaskHandle = nullptr;
-        }
-    }
-    
+    // First stop the web server (most important to prevent crashes)
     getWebManager().stop();
+    
+    // Small delay to let any pending HTTP requests complete
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // Now safely delete the config task
+    // Only attempt deletion if handle appears valid (not null, not obviously invalid)
+    if (_configTaskHandle != nullptr && _configTaskHandle != (TaskHandle_t)0x1) {
+        // Try to delete - if it's already invalid, the task delete will handle it
+        vTaskDelete(_configTaskHandle);
+        ESP_LOGI(TAG, "Config task deleted");
+    } else {
+        ESP_LOGI(TAG, "Config task handle invalid or null, skipping delete");
+    }
+    _configTaskHandle = nullptr;
+    
     esp_wifi_stop();
     vTaskDelay(pdMS_TO_TICKS(100));
     
