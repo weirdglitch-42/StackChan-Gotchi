@@ -797,48 +797,45 @@ void AppGotchi::renderUI() {
     }
     // STATS mode - full screen stats display
     else if (_currentMode == gotchi::Mode::STATS) {
-        // Full screen stats display with new format
-        _networkListLabel->setSize(320, 217);
-        _networkListLabel->align(LV_ALIGN_BOTTOM_MID, 0, -2);
+        // Full screen stats display - reduced height to fit 14 lines
+        _networkListLabel->setSize(310, 180);
+        _networkListLabel->align(LV_ALIGN_TOP_LEFT, 5, 40);
         _networkListLabel->setBgColor(lv_color_hex(0x1A0A1A));  // Dark purple bg
         _networkListLabel->setTextColor(lv_color_hex(0xDD88DD));  // Purple text
         
-        // Build full stats display with new fields
+        // Build full stats display with new fields (condensed to fit)
         char statsDisplay[600];
         const char* prestigeStr = stats.prestige > 0 ? "+P" : "";
         
         int hours = stats.uptimeSeconds / 3600;
         int mins = (stats.uptimeSeconds % 3600) / 60;
         
-        int sessHours = stats.sessionTimeSeconds / 3600;
-        int sessMins = (stats.sessionTimeSeconds % 3600) / 60;
+        int sessMins = stats.sessionTimeSeconds / 60;
         
         // Get level title - handle null
         const char* titleStr = stats.levelTitle ? stats.levelTitle : "Unknown";
         
         snprintf(statsDisplay, sizeof(statsDisplay),
             "=========== STATS ============\n"
-            "%s (%d)%s\n"
-            "XP: %d/%d  (%d%% to next)\n"
+            "%s (%d)%s | XP:%d/%d (%d%%)\n"
             "------------------------\n"
             "DISCOVERY:\n"
-            "Nets: %u | HS: %u | BLE: %u\n"
-            "Channels: %u\n"
+            "Nets:%u HS:%u BLE:%u CH:%u\n"
             "------------------------\n"
             "PROGRESS:\n"
-            "Session: +%d XP (%dh%dm)\n"
-            "Achieve: %u/37 (+%d XP)\n"
+            "Session:+%d XP (%dm)\n"
+            "Achieve:%u/37 (+%d XP)\n"
             "------------------------\n"
             "SYSTEM:\n"
-            "Uptime: %dh%dm | Heap: %d\n"
-            "GPS: %s (%d sats)",
+            "Up:%dh%dm Heap:%d\n"
+            "GPS:%s (%dsat)",
             titleStr, (int)stats.level, prestigeStr,
             (int)stats.xp, (int)stats.xpToNextLevel, (int)stats.progressPercent,
             (unsigned)stats.networksFound,
             (unsigned)stats.handshakesCaptured,
             (unsigned)stats.bleDevicesFound,
             (unsigned)stats.channelsScanned,
-            (int)stats.sessionXPGain, sessHours, sessMins,
+            (int)stats.sessionXPGain, sessMins,
             (unsigned)stats.achievementCount,
             (int)stats.achievementXP,
             hours, mins,
