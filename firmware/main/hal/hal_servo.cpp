@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "hal.h"
-#include "drivers/SCServo_lib/src/SCSCL.h"
+#include "drivers/FTServo_Arduino/src/SCSCL.h"
 #include <stackchan/stackchan.h>
 #include <smooth_ui_toolkit.hpp>
 #include <mooncake_log.h>
