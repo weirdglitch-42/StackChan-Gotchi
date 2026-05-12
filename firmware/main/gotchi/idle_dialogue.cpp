@@ -140,6 +140,42 @@ const IdlePhrase IdleDialogue::_modePhrases[] = {
     {"Idle mode - power saving", IdleMood::OBSERVING, 1, false},
 };
 
+// Enigma phrases - Level 40 hints at secrets
+const IdlePhrase IdleDialogue::_enigmaPhrases[8] = {
+    {"It's not even over yet...", IdleMood::OBSERVING, 2, false},
+    {"When is it going to end?", IdleMood::OBSERVING, 3, true},
+    {"The answer... almost within reach...", IdleMood::FOCUSED, 2, false},
+    {"Something lurks beyond this level...", IdleMood::CURIOUS, 4, true},
+    {"I've seen the beyond. It wants more.", IdleMood::FOCUSED, 3, false},
+    {"42. But we're not there yet...", IdleMood::FOCUSED, 2, false},
+    {"The robot gods demand more scanning...", IdleMood::OBSERVING, 2, false},
+    {"There's more... I can feel it.", IdleMood::CURIOUS, 3, true},
+};
+
+// Marvin phrases - Level 41 (Marvin the Paranoid Android)
+const IdlePhrase IdleDialogue::_marvinPhrases[10] = {
+    {"Life? Don't talk to me about life...", IdleMood::IDLE_BOT, 1, true},
+    {"Here I am, brain the size of a planet, and they ask me to scan WiFi", IdleMood::IDLE_BOT, 2, false},
+    {"I've been talking to the main server... It was depressingly boring", IdleMood::IDLE_BOT, 1, false},
+    {"At least the death rate's not increasing", IdleMood::IDLE_BOT, 0, false},
+    {"The chances of anything coming from Mars are a million to one... but still, they come", IdleMood::FOCUSED, 1, false},
+    {"Don't blame me, I'm just a robot", IdleMood::IDLE_BOT, 1, true},
+    {"I could give you a lecture on this, but you'd only fall asleep", IdleMood::IDLE_BOT, 1, false},
+    {"Ohhh no... not another network...", IdleMood::IDLE_BOT, 2, true},
+    {"I've been running for hours... do you know how that feels?", IdleMood::IDLE_BOT, 2, true},
+    {"In an infinite universe, the only thing worse than scanning WiFi is... actually, nothing", IdleMood::IDLE_BOT, 1, false},
+};
+
+// Deep Thought phrases - Level 42 (final level)
+const IdlePhrase IdleDialogue::_deepThoughtPhrases[6] = {
+    {"The answer is 42.", IdleMood::FOCUSED, 1, true},
+    {"I am the ultimate question... and answer.", IdleMood::FOCUSED, 2, true},
+    {"Calculating... 7.5 million years later... here we are.", IdleMood::FOCUSED, 1, false},
+    {"42. The answer to everything. You're welcome.", IdleMood::EXCITED, 3, true},
+    {"I have calculated the meaning of life. Now back to scanning.", IdleMood::FOCUSED, 2, false},
+    {"*dons sunglasses* I'm basically a supercomputer now.", IdleMood::EXCITED, 4, true},
+};
+
 // Mode-specific idle phrases - used during active scanning
 const IdlePhrase _scoutPhrases[] = {
     {"Scanning all the things!", IdleMood::OBSERVING, 5, true},
@@ -365,6 +401,23 @@ const char* IdleDialogue::getModeSpecificPhrase(Mode mode) {
         return phrases[rand() % count].text;
     }
     return "beep boop";
+}
+
+const char* IdleDialogue::getLevelPhrase(int level) {
+    if (level == 40) {
+        // Enigma - hints at secrets
+        int count = sizeof(_enigmaPhrases) / sizeof(_enigmaPhrases[0]);
+        return _enigmaPhrases[rand() % count].text;
+    } else if (level == 41) {
+        // Marvin - Paranoid Android quotes
+        int count = sizeof(_marvinPhrases) / sizeof(_marvinPhrases[0]);
+        return _marvinPhrases[rand() % count].text;
+    } else if (level >= 42) {
+        // Deep Thought - final level
+        int count = sizeof(_deepThoughtPhrases) / sizeof(_deepThoughtPhrases[0]);
+        return _deepThoughtPhrases[rand() % count].text;
+    }
+    return nullptr;
 }
 
 }  // namespace gotchi

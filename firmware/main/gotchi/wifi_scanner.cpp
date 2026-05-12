@@ -20,8 +20,8 @@ static const int CHANNEL_SEQ_LEN = 13;
 
 WifiScanner::WifiScanner() 
     : _initialized(false), _sniffing(false), _scanning(false),
-      _currentChannel(1), _channelsScanned(0), _lastChannelHop(0),
-      _hopIntervalMs(500), _channelHopEnabled(true), _hopIndex(0) {
+      _currentChannel(1), _channelsScanned(0), _channelsVisitedMask(0),
+      _lastChannelHop(0), _hopIntervalMs(500), _channelHopEnabled(true), _hopIndex(0) {
 }
 
 bool WifiScanner::init() {
@@ -235,6 +235,12 @@ void WifiScanner::update() {
         _currentChannel = CHANNEL_SEQ[_hopIndex];
         esp_wifi_set_channel(_currentChannel, WIFI_SECOND_CHAN_NONE);
         _channelsScanned++;
+        
+        // Track visited channels in bitmask (bit 0 = channel 1, bit 12 = channel 13)
+        if (_currentChannel >= 1 && _currentChannel <= 13) {
+            _channelsVisitedMask |= (1 << (_currentChannel - 1));
+        }
+        
         _lastChannelHop = now;
     }
 }

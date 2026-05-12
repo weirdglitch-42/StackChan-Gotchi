@@ -18,10 +18,15 @@ public:
     
     const char* getLevelTitle() const;
     int getXPForLevel(int level) const;
+    int getXPToNextLevel() const;
+    int getXPToMaxLevel() const;
     int getXPProgress() const;
+    bool isLevelSecret(int level) const;
+    bool isLevelUnlocked(int level) const;
     
     uint8_t getPrestige() const { return _prestige; }
     void prestigeReset();
+    float getXPMultiplier() const;
     
     void loadFromNVS();
     void saveToNVS();
@@ -30,6 +35,7 @@ private:
     void updateLevel();
     static const char* LEVEL_TITLES[];
     static const int XP_PER_LEVEL[];
+    static const int LEVEL_SECRET_UNLOCK[];
     
     int32_t _xp;
     int32_t _level;

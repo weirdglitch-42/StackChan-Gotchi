@@ -7,15 +7,18 @@
 #include <cstdint>
 #include <esp_err.h>
 #include <esp_netif.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 namespace gotchi {
 
 class ModeManager {
 public:
     ModeManager();
+    ~ModeManager();
     
-    Mode getCurrentMode() const { return _currentMode; }
-    Mood getCurrentMood() const { return _currentMood; }
+    Mode getCurrentMode() const;
+    Mood getCurrentMood() const;
     bool isBeaconSpamming() const { return _beaconSpamming; }
     bool isConfigModeActive() const { return _configModeActive; }
     
@@ -42,6 +45,7 @@ private:
     bool _beaconSpamming;
     bool _configModeActive;
     TaskHandle_t _configTaskHandle;
+    SemaphoreHandle_t _netifMutex;
     static bool _netifInitialized;
     static esp_netif_t* _apNetifHandle;
 };

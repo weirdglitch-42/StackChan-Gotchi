@@ -13,13 +13,10 @@ static const char* TAG = "gotchi_rogue";
 
 namespace gotchi {
 
-static RogueManager* _instance = nullptr;
+static RogueManager _instance;
 
 RogueManager& getRogueManager() {
-    if (!_instance) {
-        _instance = new RogueManager();
-    }
-    return *_instance;
+    return _instance;
 }
 
 RogueManager::RogueManager()

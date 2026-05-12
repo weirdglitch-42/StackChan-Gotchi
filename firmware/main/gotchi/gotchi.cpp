@@ -32,6 +32,8 @@ static uint32_t _sessionStartTime = 0;
 static uint32_t _sessionStartXP = 0;
 static int32_t _minHeapSession = 0;
 static bool _huntDisclaimerShown = false;
+static uint16_t _lastTrackedChannels = 0;
+static int _lastTrackedBLECount = 0;
 
 static GotchiConfig _config;
 
@@ -40,6 +42,11 @@ const char* getModeName(Mode mode) {
 }
 
 const char* getLevelTitle(int level) {
+    if (level < 1 || level > 42) level = 1;
+    return getXPSystem().getLevelTitle();
+}
+
+const char* getCurrentLevelTitle() {
     return getXPSystem().getLevelTitle();
 }
 
@@ -47,8 +54,28 @@ int getXPForLevel(int level) {
     return getXPSystem().getXPForLevel(level);
 }
 
+int getXPToNextLevel() {
+    return getXPSystem().getXPToNextLevel();
+}
+
+int getXPToMaxLevel() {
+    return getXPSystem().getXPToMaxLevel();
+}
+
 int getXPProgress(int32_t xp, int level) {
     return getXPSystem().getXPProgress();
+}
+
+bool isLevelSecret(int level) {
+    return getXPSystem().isLevelSecret(level);
+}
+
+bool isLevelUnlocked(int level) {
+    return getXPSystem().isLevelUnlocked(level);
+}
+
+float getXPMultiplier() {
+    return getXPSystem().getXPMultiplier();
 }
 
 static void loadFromNVS() {
@@ -141,12 +168,42 @@ void update() {
     uint32_t now = GetHAL().millis();
     uint32_t uptime = (now - _startTime) / 1000;
 
-    if (uptime % 3000 == 0 && uptime > 0) {
+    // Uptime XP: +1 XP per minute
+    if (uptime % 60 == 0 && uptime > 0) {
         addXP(1);
     }
     
+    // Network XP: +1 XP per minute if networks found
     if (getNetworkDatabase().getNetworksFound() > 0 && (now % 60000) < 100) {
         addXP(1);
+    }
+    
+    // Handshake XP: +25 XP per handshake (check for new handshakes)
+    int currentHandshakes = getHandshakeParser().getCapturedCount();
+    if (currentHandshakes > (int)_handshakesCaptured) {
+        int newHandshakes = currentHandshakes - _handshakesCaptured;
+        _handshakesCaptured = currentHandshakes;
+        addXP(newHandshakes * 25);
+        ESP_LOGI(TAG, "New handshake(s)! Awarded %d XP", newHandshakes * 25);
+    }
+    
+    // Channel XP: +5 XP for each unique channel visited
+    uint16_t channelsVisited = getWifiScanner().getChannelsVisitedMask();
+    uint16_t newChannels = channelsVisited & ~_lastTrackedChannels;
+    int newChannelCount = __builtin_popcount(newChannels);
+    if (newChannelCount > 0) {
+        _lastTrackedChannels = channelsVisited;
+        addXP(newChannelCount * 5);
+        ESP_LOGI(TAG, "New channel(s) visited! Awarded %d XP", newChannelCount * 5);
+    }
+    
+    // BLE XP: +2 XP per new BLE device
+    int currentBLEDevices = getNetworkDatabase().getBLEDeviceCount();
+    if (currentBLEDevices > _lastTrackedBLECount) {
+        int newDevices = currentBLEDevices - _lastTrackedBLECount;
+        _lastTrackedBLECount = currentBLEDevices;
+        addXP(newDevices * 2);
+        ESP_LOGI(TAG, "New BLE device(s)! Awarded %d XP", newDevices * 2);
     }
 }
 
@@ -181,25 +238,50 @@ Mood getCurrentMood() {
 
 Stats getStats() {
     Stats stats;
+    
+    // Core XP
     stats.xp = getXPSystem().getXP();
     stats.level = getXPSystem().getLevel();
+    stats.xpToNextLevel = getXPSystem().getXPToNextLevel();
+    stats.xpToMaxLevel = getXPSystem().getXPToMaxLevel();
+    stats.levelTitle = getXPSystem().getLevelTitle();
+    stats.prestige = getXPSystem().getPrestige();
+    stats.progressPercent = getXPSystem().getXPProgress();
+    
+    // Discovery stats
     stats.networksFound = getNetworkDatabase().getNetworksFound();
     stats.handshakesCaptured = _handshakesCaptured;
+    stats.bleDevicesFound = getNetworkDatabase().getBLEDeviceCount();
     stats.channelsScanned = getWifiScanner().getChannelsScanned();
+    
+    // Achievement stats
+    stats.achievementCount = getAchievementSystem().getAchievementCount();
+    stats.achievementXP = 0;
+    
+    // Time stats
     stats.uptimeSeconds = (GetHAL().millis() - _startTime) / 1000;
-    
-    stats.sessionNetworks = getNetworkDatabase().getNetworkCount();
     stats.sessionTimeSeconds = (GetHAL().millis() - _sessionStartTime) / 1000;
-    stats.sessionStartTime = _sessionStartTime;
-    stats.sessionXPGain = getXPSystem().getXP() - _sessionStartXP;
-    stats.currentChannel = getWifiScanner().getCurrentChannel();
+    stats.totalSessions = 1;
     
+    // XP stats
+    stats.sessionXPGain = getXPSystem().getXP() - _sessionStartXP;
+    stats.totalXPGained = getXPSystem().getXP();
+    
+    // Daily challenge
+    ChallengeInfo challenge;
+    stats.dailyChallengeActive = getAchievementSystem().getDailyChallenge(challenge);
+    stats.dailyChallengeName = challenge.name;
+    stats.dailyChallengeComplete = false;
+    
+    // System
+    stats.currentChannel = getWifiScanner().getCurrentChannel();
     stats.freeHeap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
     if (_minHeapSession == 0 || stats.freeHeap < _minHeapSession) {
         _minHeapSession = stats.freeHeap;
     }
     stats.minHeap = _minHeapSession;
     
+    // GPS data
     GPSData gps = getGpsManager().getData();
     stats.gpsValid = gps.valid;
     stats.gpsSatellites = gps.satellites;
@@ -217,8 +299,9 @@ void addXP(int32_t amount) {
     if (!_initialized) return;
     if (amount <= 0) return;
     
-    float multiplier = getModeInfo(getCurrentMode()).xpMultiplier;
-    int32_t effectiveAmount = (int32_t)(amount * multiplier);
+    float modeMultiplier = getModeInfo(getCurrentMode()).xpMultiplier;
+    float prestigeMultiplier = getXPSystem().getXPMultiplier();
+    int32_t effectiveAmount = (int32_t)(amount * modeMultiplier * prestigeMultiplier);
     getXPSystem().addXP(effectiveAmount);
 }
 
