@@ -19,6 +19,7 @@ public:
     bool isSniffing() const { return _sniffing; }
     uint8_t getCurrentChannel() const { return _currentChannel; }
     uint32_t getChannelsScanned() const { return _channelsScanned; }
+    uint16_t getChannelsVisitedMask() const { return _channelsVisitedMask; }
     
     bool startSniff();
     bool stopSniff();
@@ -41,6 +42,7 @@ private:
     bool _scanning;
     uint8_t _currentChannel;
     uint32_t _channelsScanned;
+    uint16_t _channelsVisitedMask;
     uint32_t _lastChannelHop;
     uint32_t _hopIntervalMs;
     bool _channelHopEnabled;

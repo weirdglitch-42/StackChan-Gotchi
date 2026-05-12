@@ -99,7 +99,7 @@ void AppGotchi::onOpen() {
     
     if (GetStackChan().hasAvatar()) {
         GetStackChan().avatar().setSpeech("Scanning...");
-        GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(2000, 180, true));
+        GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(2500, 180, true));
     }
     
     _headYawOffset = 0;
@@ -162,7 +162,7 @@ void AppGotchi::initGotchi() {
         mclog::tagInfo(getAppInfo().name, "WARNING: No storage - limited functionality!");
         if (GetStackChan().hasAvatar()) {
             GetStackChan().avatar().setSpeech("No storage!");
-            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(3000, 180, true));
+            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(3500, 180, true));
         }
     }
 }
@@ -270,10 +270,18 @@ void AppGotchi::handleInput() {
 void AppGotchi::cycleMode() {
     gotchi::Mode next = gotchi::getModeInfo(_currentMode).nextMode;
     
-    // Skip disabled modes
-    for (int i = 0; i < 10 && !gotchi::canAccessMode(next); i++) {
+    // Skip disabled modes - keep trying until we find an accessible one or wrap completely
+    int attempts = 0;
+    while (!gotchi::canAccessMode(next) && attempts < 12) {
         next = gotchi::getModeInfo(next).nextMode;
+        attempts++;
     }
+    
+    // Fallback to IDLE if somehow all modes are disabled (safety net)
+    if (!gotchi::canAccessMode(next)) {
+        next = gotchi::Mode::IDLE;
+    }
+    
     _currentMode = next;
     
     gotchi::setMode(_currentMode);
@@ -287,7 +295,7 @@ void AppGotchi::cycleMode() {
         gotchi::acknowledgeHuntDisclaimer();
         if (GetStackChan().hasAvatar()) {
             GetStackChan().avatar().setSpeech("HUNT Mode!\nSends deauth frames.\nOK to proceed?");
-            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(4000, 180, true));
+            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(4500, 180, true));
         }
         showedSpecialMessage = true;
     }
@@ -296,7 +304,7 @@ void AppGotchi::cycleMode() {
     if (!showedSpecialMessage && _currentMode == gotchi::Mode::ROGUE) {
         if (GetStackChan().hasAvatar()) {
             GetStackChan().avatar().setSpeech("EDUCATIONAL!\nOwn networks only!");
-            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(3000, 180, true));
+            GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(3500, 180, true));
         }
         showedSpecialMessage = true;
     }
@@ -310,12 +318,18 @@ void AppGotchi::cycleMode() {
     // Only show mode name if no special message was shown
     if (!showedSpecialMessage && GetStackChan().hasAvatar()) {
         GetStackChan().avatar().setSpeech(modeName);
-        GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(1500, 180, true));
+        GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(2000, 180, true));
     }
 }
 
 void AppGotchi::cycleModeBackward() {
-    _currentMode = gotchi::getModeInfo(_currentMode).prevMode;
+    gotchi::Mode prev = gotchi::getModeInfo(_currentMode).prevMode;
+    
+    // Skip disabled modes (same logic as forward cycle)
+    for (int i = 0; i < 10 && !gotchi::canAccessMode(prev); i++) {
+        prev = gotchi::getModeInfo(prev).prevMode;
+    }
+    _currentMode = prev;
     
     gotchi::setMode(_currentMode);
     gotchi::onModeEnter(_currentMode);
@@ -323,7 +337,7 @@ void AppGotchi::cycleModeBackward() {
     const char* modeName = gotchi::getModeName(_currentMode);
     if (GetStackChan().hasAvatar()) {
         GetStackChan().avatar().setSpeech(modeName);
-        GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(1500, 180, true));
+        GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(2000, 180, true));
     }
 }
 
@@ -783,39 +797,51 @@ void AppGotchi::renderUI() {
     }
     // STATS mode - full screen stats display
     else if (_currentMode == gotchi::Mode::STATS) {
-        // Full screen stats display
-        _networkListLabel->setSize(320, 220);
-        _networkListLabel->align(LV_ALIGN_BOTTOM_MID, 0, -5);
+        // Full screen stats display with new format
+        _networkListLabel->setSize(320, 217);
+        _networkListLabel->align(LV_ALIGN_BOTTOM_MID, 0, -2);
         _networkListLabel->setBgColor(lv_color_hex(0x1A0A1A));  // Dark purple bg
         _networkListLabel->setTextColor(lv_color_hex(0xDD88DD));  // Purple text
         
-        // Build full stats display
-        char statsDisplay[500];
+        // Build full stats display with new fields
+        char statsDisplay[600];
         const char* prestigeStr = stats.prestige > 0 ? "+P" : "";
         
         int hours = stats.uptimeSeconds / 3600;
         int mins = (stats.uptimeSeconds % 3600) / 60;
-        int secs = stats.uptimeSeconds % 60;
         
         int sessHours = stats.sessionTimeSeconds / 3600;
         int sessMins = (stats.sessionTimeSeconds % 3600) / 60;
         
+        // Get level title - handle null
+        const char* titleStr = stats.levelTitle ? stats.levelTitle : "Unknown";
+        
         snprintf(statsDisplay, sizeof(statsDisplay),
             "=========== STATS ============\n"
-            "Lv: %d%s  XP: %d  Prog: %d%%\n"
-            "Ach: %u/17 | Nets: %u | HS: %u\n"
-            "------------------------------\n"
-            "Session: %u nets | %dh%dm | +%u XP\n"
-            "Uptime: %dh%dm%ds | Heap: %d\n"
+            "%s (%d)%s\n"
+            "XP: %d/%d  (%d%% to next)\n"
+            "------------------------\n"
+            "DISCOVERY:\n"
+            "Nets: %u | HS: %u | BLE: %u\n"
+            "Channels: %u\n"
+            "------------------------\n"
+            "PROGRESS:\n"
+            "Session: +%d XP (%dh%dm)\n"
+            "Achieve: %u/37 (+%d XP)\n"
+            "------------------------\n"
+            "SYSTEM:\n"
+            "Uptime: %dh%dm | Heap: %d\n"
             "GPS: %s (%d sats)",
-            (int)stats.level, prestigeStr, (int)stats.xp,
-            gotchi::getXPProgress(stats.xp, stats.level),
-            (unsigned)stats.achievementCount,
+            titleStr, (int)stats.level, prestigeStr,
+            (int)stats.xp, (int)stats.xpToNextLevel, (int)stats.progressPercent,
             (unsigned)stats.networksFound,
             (unsigned)stats.handshakesCaptured,
-            (unsigned)stats.sessionNetworks, sessHours, sessMins,
-            (unsigned)stats.sessionXPGain,
-            hours, mins, secs,
+            (unsigned)stats.bleDevicesFound,
+            (unsigned)stats.channelsScanned,
+            (int)stats.sessionXPGain, sessHours, sessMins,
+            (unsigned)stats.achievementCount,
+            (int)stats.achievementXP,
+            hours, mins,
             (int)stats.freeHeap,
             stats.gpsValid ? "OK" : "No",
             (int)stats.gpsSatellites);
@@ -901,7 +927,7 @@ void AppGotchi::renderUI() {
                     devices.back().name : "Unknown Device";
                 const char* phrase = _idleDialogue.getBLEDeviceFoundPhrase(latestName);
                 GetStackChan().avatar().setSpeech(phrase);
-                GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(1500, 180, true));
+                GetStackChan().addModifier(std::make_unique<stackchan::SpeakingModifier>(2000, 180, true));
             }
             
             // Flash neon lights briefly when BLE device found
@@ -1500,10 +1526,13 @@ void AppGotchi::updateHeaderBoxes() {
         case gotchi::Mode::STATS:
             boxBgColor = lv_color_hex(0x330033);
             boxTextColor = lv_color_hex(0xFF88FF);
-            snprintf(boxText[0], 20, "Lv:%d%s", (int)stats.level, stats.prestige > 0 ? "+P" : "");
-            snprintf(boxText[1], 20, "XP:%d", (int)stats.xp);
-            snprintf(boxText[2], 20, "Ach:%d/17", (int)stats.achievementCount);
-            snprintf(boxText[3], 20, "Up:%dh%dm", (int)(stats.uptimeSeconds / 3600), (int)((stats.uptimeSeconds % 3600) / 60));
+            {
+                const char* titleStr = stats.levelTitle ? stats.levelTitle : "Unknown";
+                snprintf(boxText[0], 20, "%s", titleStr);
+                snprintf(boxText[1], 20, "XP:%d", (int)stats.xp);
+                snprintf(boxText[2], 20, "Next:%d", (int)stats.xpToNextLevel);
+                snprintf(boxText[3], 20, "%d%%", (int)stats.progressPercent);
+            }
             break;
         default:
             boxBgColor = lv_color_hex(0x111111);

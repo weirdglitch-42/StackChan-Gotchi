@@ -18,15 +18,20 @@ public:
      * @param destroyAfterMs 持续说话时间（0 为永久，直到手动移除）
      * @param mouthIntervalMs 嘴巴开合频率（默认 180ms）
      * @param enableMotion 是否在说话时伴随头部微动
+     * @param silentGapMs 说话结束后静默 gap 时间（默认 500ms），设为 0 禁用
      */
-    SpeakingModifier(uint32_t destroyAfterMs = 0, uint32_t mouthIntervalMs = 180, bool enableMotion = true)
-        : _mouth_interval_ms(mouthIntervalMs), _enable_motion(enableMotion)
+    SpeakingModifier(uint32_t destroyAfterMs = 0, uint32_t mouthIntervalMs = 180, bool enableMotion = true, uint32_t silentGapMs = 500)
+        : _mouth_interval_ms(mouthIntervalMs), _silent_gap_duration_ms(silentGapMs), _enable_motion(enableMotion)
     {
         uint32_t now = GetHAL().millis();
 
         // 销毁计时
         if (destroyAfterMs > 0) {
-            _destroy_at   = now + destroyAfterMs;
+            // Add slight randomization to speech duration (±150ms)
+            int32_t randomOffset = Random::getInstance().getInt(-150, 150);
+            int32_t adjustedDuration = static_cast<int32_t>(destroyAfterMs) + randomOffset;
+            if (adjustedDuration < 500) adjustedDuration = 500;
+            _destroy_at   = now + static_cast<uint32_t>(adjustedDuration);
             _has_lifetime = true;
         }
 
@@ -39,6 +44,8 @@ public:
         }
 
         _need_get_prev_angles = true;
+        _is_in_silent_gap = false;
+        _silent_gap_start = 0;
     }
 
     void _update(Modifiable& stackchan) override
@@ -49,10 +56,31 @@ public:
 
         uint32_t now = GetHAL().millis();
 
+        // 检查静默 gap 逻辑
+        if (_is_in_silent_gap) {
+            if (now - _silent_gap_start >= _silent_gap_duration_ms) {
+                requestDestroy();
+            }
+            return;
+        }
+
         // 检查销毁逻辑
         if (_has_lifetime && now >= _destroy_at) {
-            stackchan.avatar().mouth().setWeight(0);  // 闭嘴
-            requestDestroy();
+            // 进入静默 gap 阶段
+            if (_silent_gap_duration_ms > 0) {
+                stackchan.avatar().setSpeech("");
+                stackchan.avatar().mouth().setWeight(0);
+                _is_in_silent_gap = true;
+                _silent_gap_start = now;
+                // Add slight randomization to gap duration (±100ms)
+                int32_t randomOffset = Random::getInstance().getInt(-100, 100);
+                int32_t adjustedGap = static_cast<int32_t>(_silent_gap_duration_ms) + randomOffset;
+                if (adjustedGap < 200) adjustedGap = 200;
+                _silent_gap_duration_ms = static_cast<uint32_t>(adjustedGap);
+            } else {
+                stackchan.avatar().mouth().setWeight(0);
+                requestDestroy();
+            }
             return;
         }
 
@@ -135,11 +163,14 @@ private:
     uint32_t _next_mouth_tick  = 0;
     uint32_t _next_motion_tick = 0;
     uint32_t _mouth_interval_ms;
+    uint32_t _silent_gap_duration_ms;
+    uint32_t _silent_gap_start;
 
     bool _has_lifetime         = false;
     bool _enable_motion        = false;
     bool _is_mouth_open        = false;
     bool _need_get_prev_angles = true;
+    bool _is_in_silent_gap     = false;
 
     uitk::Vector2i _prev_angles;
 };

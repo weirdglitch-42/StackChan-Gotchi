@@ -274,7 +274,11 @@ const char* WebManager::loadHtmlFromFile(const char* path) {
 
 esp_err_t WebManager::rootHandler(httpd_req_t* req) {
     WebManager* wm = getInstance();
-    if (!wm) return ESP_FAIL;
+    if (!wm) {
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_send(req, "Service not available", 23);
+        return ESP_OK;
+    }
     
     const char* html = wm->generateHtml();
     httpd_resp_set_type(req, "text/html");
@@ -299,21 +303,32 @@ esp_err_t WebManager::apiConfigHandler(httpd_req_t* req) {
     
     char content[256];
     int ret = httpd_req_recv(req, content, sizeof(content) - 1);
-    if (ret <= 0) return ESP_FAIL;
+    if (ret <= 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"Failed to read request\"}", 48);
+        return ESP_OK;
+    }
     content[ret] = '\0';
     
-    // Parse mode from JSON and set it
+    ESP_LOGI(TAG, "Config POST received: %s", content);
+    
+    // Parse mode from JSON - simple extraction
     char modeStr[32] = {0};
-    if (sscanf(content, "%*[^:]%*c%31s", modeStr) == 1) {
-        // Remove trailing }
-        char* p = strchr(modeStr, '}');
-        if (p) *p = '\0';
-        
-        // Remove quotes
-        if (modeStr[0] == '"') memmove(modeStr, modeStr+1, strlen(modeStr));
-        int len = strlen(modeStr);
-        if (len > 0 && modeStr[len-1] == '"') modeStr[len-1] = '\0';
-        
+    char* modeStart = strstr(content, "\"mode\"");
+    if (modeStart) {
+        modeStart = strchr(modeStart, ':');
+        if (modeStart) {
+            modeStart++;
+            while (*modeStart == ' ' || *modeStart == '"') modeStart++;
+            char* modeEnd = strchr(modeStart, '"');
+            if (modeEnd && (modeEnd - modeStart) < 32) {
+                strncpy(modeStr, modeStart, modeEnd - modeStart);
+                modeStr[modeEnd - modeStart] = '\0';
+            }
+        }
+    }
+    
+    if (strlen(modeStr) > 0) {
         Mode m = Mode::IDLE;
         if (strcmp(modeStr, "SCOUT") == 0) m = Mode::SCOUT;
         else if (strcmp(modeStr, "HUNT") == 0 && isHuntEnabled()) m = Mode::HUNT;
@@ -336,17 +351,27 @@ esp_err_t WebManager::apiStatsHandler(httpd_req_t* req) {
     Stats s = getStats();
     auto networks = getNetworks();
     
-    char json[1024];
+    const char* titleStr = s.levelTitle ? s.levelTitle : "Unknown";
+    
+    char json[1536];
     int pos = snprintf(json, sizeof(json),
-        "{\"mode\":\"%s\",\"level\":%d,\"xp\":%d,\"networks\":%u,\"handshakes\":%u,"
-        "\"prestige\":%u,\"achievements\":%u,\"uptime\":\"%us\",\"sessionXP\":%u,\"sessionTime\":\"%us\",\"networksList\":[",
+        "{\"mode\":\"%s\",\"level\":%d,\"levelTitle\":\"%s\",\"prestige\":%u,"
+        "\"xp\":%d,\"xpToNextLevel\":%d,\"xpToMaxLevel\":%d,\"progressPercent\":%u,"
+        "\"discovery\":{\"networks\":%u,\"handshakes\":%u,\"bleDevices\":%u,\"channels\":%u},"
+        "\"achievements\":{\"count\":%u,\"total\":37,\"xpEarned\":%d},"
+        "\"time\":{\"uptime\":%u,\"sessionTime\":%u,\"sessionXP\":%d},"
+        "\"heap\":{\"free\":%d,\"min\":%d},"
+        "\"gps\":{\"valid\":%s,\"satellites\":%u,\"lat\":%.6f,\"lon\":%.6f},"
+        "\"networksList\":[",
         getModeName(getCurrentMode()),
-        (int)s.level, (int)s.xp,
+        (int)s.level, titleStr, (unsigned)s.prestige,
+        (int)s.xp, (int)s.xpToNextLevel, (int)s.xpToMaxLevel, (unsigned)s.progressPercent,
         (unsigned)s.networksFound, (unsigned)s.handshakesCaptured,
-        (unsigned)s.prestige, (unsigned)s.achievementCount,
-        (unsigned)s.uptimeSeconds,
-        (unsigned)(s.xp - s.sessionXPGain),
-        (unsigned)s.sessionTimeSeconds);
+        (unsigned)s.bleDevicesFound, (unsigned)s.channelsScanned,
+        (unsigned)s.achievementCount, (int)s.achievementXP,
+        (unsigned)s.uptimeSeconds, (unsigned)s.sessionTimeSeconds, (int)s.sessionXPGain,
+        (int)s.freeHeap, (int)s.minHeap,
+        s.gpsValid ? "true" : "false", (unsigned)s.gpsSatellites, s.gpsLat, s.gpsLon);
     
     for (size_t i = 0; i < networks.size() && i < 10; i++) {
         pos += snprintf(json + pos, sizeof(json) - pos,
@@ -404,8 +429,9 @@ esp_err_t WebManager::apiRogueSetTargetHandler(httpd_req_t* req) {
     int ret = httpd_req_recv(req, content, sizeof(content) - 1);
     if (ret <= 0) {
         httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, "{\"error\":\"no_data\"}", 17);
-        return ESP_FAIL;
+        return ESP_OK;
     }
     content[ret] = '\0';
     
@@ -468,8 +494,14 @@ esp_err_t WebManager::apiPwnagotchiHandler(httpd_req_t* req) {
 esp_err_t WebManager::apiPermissionsHandler(httpd_req_t* req) {
     char content[256];
     int ret = httpd_req_recv(req, content, sizeof(content) - 1);
-    if (ret <= 0) return ESP_FAIL;
+    if (ret <= 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"No data received\"}", 43);
+        return ESP_OK;
+    }
     content[ret] = '\0';
+    
+    ESP_LOGI(TAG, "Received permissions JSON: %s", content);
     
     bool huntEnabled = false;
     bool rogueEnabled = false;

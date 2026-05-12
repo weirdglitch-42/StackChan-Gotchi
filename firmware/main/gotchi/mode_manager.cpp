@@ -27,7 +27,24 @@ esp_netif_t* ModeManager::_apNetifHandle = nullptr;
 
 ModeManager::ModeManager() 
     : _currentMode(Mode::IDLE), _currentMood(Mood::NEUTRAL),
-      _beaconSpamming(false), _configModeActive(false), _configTaskHandle(nullptr) {
+      _beaconSpamming(false), _configModeActive(false), _configTaskHandle(nullptr),
+      _netifMutex(nullptr) {
+    _netifMutex = xSemaphoreCreateMutex();
+}
+
+ModeManager::~ModeManager() {
+    if (_netifMutex != nullptr) {
+        vSemaphoreDelete(_netifMutex);
+        _netifMutex = nullptr;
+    }
+}
+
+Mode ModeManager::getCurrentMode() const {
+    return _currentMode;
+}
+
+Mood ModeManager::getCurrentMood() const {
+    return _currentMood;
 }
 
 void ModeManager::initAPNetif() {
@@ -49,9 +66,16 @@ void ModeManager::initAPNetif() {
 }
 
 void ModeManager::deinitWiFi() {
-    esp_wifi_stop();
+    esp_err_t ret = esp_wifi_stop();
+    if (ret == ESP_ERR_WIFI_NOT_STARTED) {
+        ESP_LOGD(TAG, "WiFi was not started, skipping stop");
+        return;
+    }
     vTaskDelay(pdMS_TO_TICKS(100));
-    esp_wifi_deinit();
+    ret = esp_wifi_deinit();
+    if (ret == ESP_ERR_WIFI_NOT_STARTED) {
+        ESP_LOGD(TAG, "WiFi driver was not initialized");
+    }
     vTaskDelay(pdMS_TO_TICKS(100));
 }
 
@@ -156,8 +180,16 @@ void ModeManager::startRogueMode() {
     
     initAPNetif();
     
+    if (_netifMutex != nullptr) {
+        xSemaphoreTake(_netifMutex, portMAX_DELAY);
+    }
+    
     if (!_apNetifHandle) {
         _apNetifHandle = esp_netif_create_default_wifi_ap();
+    }
+    
+    if (_netifMutex != nullptr) {
+        xSemaphoreGive(_netifMutex);
     }
     
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -219,9 +251,13 @@ void ModeManager::stopRogueMode() {
 static void configModeTask(void* param) {
     (void)param;
     ESP_LOGI(TAG, "Config mode task starting...");
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(200));
     getWebManager().start();
-    ESP_LOGI(TAG, "Config mode ready - visit http://192.168.4.1");
+    if (getWebManager().isRunning()) {
+        ESP_LOGI(TAG, "Config mode ready - visit http://192.168.4.1");
+    } else {
+        ESP_LOGW(TAG, "HTTP server failed to start!");
+    }
     
     while (getModeManager().isConfigModeActive()) {
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -238,8 +274,16 @@ void ModeManager::startConfigMode() {
     
     initAPNetif();
     
+    if (_netifMutex != nullptr) {
+        xSemaphoreTake(_netifMutex, portMAX_DELAY);
+    }
+    
     if (!_apNetifHandle) {
         _apNetifHandle = esp_netif_create_default_wifi_ap();
+    }
+    
+    if (_netifMutex != nullptr) {
+        xSemaphoreGive(_netifMutex);
     }
     
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -268,7 +312,22 @@ void ModeManager::startConfigMode() {
     esp_wifi_set_config(WIFI_IF_AP, &ap_config);
     
     esp_wifi_start();
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
+    esp_netif_ip_info_t ip_info = {0};
+    ip_info.ip.addr = ((uint32_t)192 << 24) | ((uint32_t)168 << 16) | ((uint32_t)4 << 8) | (uint32_t)1;
+    ip_info.netmask.addr = ((uint32_t)255 << 24) | ((uint32_t)255 << 16) | ((uint32_t)255 << 8) | (uint32_t)0;
+    ip_info.gw.addr = ip_info.ip.addr;
+    esp_netif_set_ip_info(_apNetifHandle, &ip_info);
+    
+    vTaskDelay(pdMS_TO_TICKS(200));
+    
+    esp_netif_ip_info_t ip;
+    if (esp_netif_get_ip_info(_apNetifHandle, &ip) == ESP_OK) {
+        ESP_LOGI(TAG, "AP IP: " IPSTR, IP2STR(&ip.ip));
+    } else {
+        ESP_LOGW(TAG, "Failed to get AP IP info");
+    }
     
     _configModeActive = true;
     xTaskCreate(configModeTask, "config_task", 4096, NULL, 5, &_configTaskHandle);
@@ -282,8 +341,11 @@ void ModeManager::stopConfigMode() {
     _configModeActive = false;
     
     if (_configTaskHandle) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-        _configTaskHandle = nullptr;
+        vTaskDelay(pdMS_TO_TICKS(200));
+        if (_configTaskHandle) {
+            vTaskDelete(_configTaskHandle);
+            _configTaskHandle = nullptr;
+        }
     }
     
     getWebManager().stop();
@@ -304,6 +366,12 @@ void ModeManager::shutdown() {
     stopMode(_currentMode);
     _currentMode = Mode::IDLE;
     _currentMood = Mood::NEUTRAL;
+    
+    if (_apNetifHandle) {
+        esp_netif_destroy(_apNetifHandle);
+        _apNetifHandle = nullptr;
+    }
+    
     ESP_LOGI(TAG, "ModeManager shutdown");
 }
 

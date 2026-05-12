@@ -88,20 +88,40 @@ struct ChallengeInfo {
 };
 
 struct Stats {
+    // Core XP
     int32_t xp;
     int32_t level;
-    uint32_t prestige;
-    uint32_t achievementCount;
+    int32_t xpToNextLevel;
+    int32_t xpToMaxLevel;
+    const char* levelTitle;
+    uint8_t prestige;
+    uint8_t progressPercent;
+    
+    // Discovery stats
     uint32_t networksFound;
     uint32_t handshakesCaptured;
+    uint32_t bleDevicesFound;
     uint32_t channelsScanned;
-    uint32_t uptimeSeconds;
     
-    // Session statistics (reset on reboot)
-    uint32_t sessionNetworks;
+    // Achievement stats
+    uint32_t achievementCount;
+    uint32_t achievementXP;
+    
+    // Time stats
+    uint32_t uptimeSeconds;
     uint32_t sessionTimeSeconds;
-    uint32_t sessionStartTime;
-    uint32_t sessionXPGain;
+    uint32_t totalSessions;
+    
+    // XP stats
+    int32_t sessionXPGain;
+    int32_t totalXPGained;
+    
+    // Daily challenge
+    bool dailyChallengeActive;
+    const char* dailyChallengeName;
+    bool dailyChallengeComplete;
+    
+    // System
     uint8_t currentChannel;
     int32_t freeHeap;
     int32_t minHeap;
@@ -135,8 +155,14 @@ Stats getStats();
 GotchiConfig getConfig();
 void addXP(int32_t amount);
 const char* getLevelTitle(int level);
+const char* getCurrentLevelTitle();
 int getXPForLevel(int level);
+int getXPToNextLevel();
+int getXPToMaxLevel();
 int getXPProgress(int32_t xp, int level);
+bool isLevelSecret(int level);
+bool isLevelUnlocked(int level);
+float getXPMultiplier();
 
 //=============================================================================
 // ACHIEVEMENTS & CHALLENGES

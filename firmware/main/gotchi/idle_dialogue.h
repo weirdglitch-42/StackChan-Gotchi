@@ -64,6 +64,11 @@ private:
     static const IdlePhrase _bleFoundPhrases[];      // When finding BLE device
     static const IdlePhrase _milestonePhrases[];     // Level up
     static const IdlePhrase _modePhrases[];          // Mode changes
+    static const IdlePhrase _enigmaPhrases[8];        // Level 40 - hints at secrets
+    static const IdlePhrase _marvinPhrases[10];      // Level 41 - Marvin the Paranoid Android
+    static const IdlePhrase _deepThoughtPhrases[6];  // Level 42 - Deep Thought
+    
+    const char* getLevelPhrase(int level);  // Get phrase based on current level
 };
 
 }  // namespace gotchi

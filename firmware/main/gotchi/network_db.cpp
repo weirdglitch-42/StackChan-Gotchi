@@ -40,6 +40,10 @@ NetworkInfo* NetworkDatabase::addNetwork(const char* ssid, const uint8_t* bssid,
         return nullptr;
     }
     
+    if (channel < 1 || channel > 14) {
+        channel = 1;
+    }
+    
     NetworkInfo net;
     memset(net.ssid, 0, 33);
     if (ssid) {

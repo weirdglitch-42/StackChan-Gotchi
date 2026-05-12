@@ -30,8 +30,19 @@ A **pwnagotchi-style WiFi/BLE reconnaissance companion** for M5Stack CoreS3 robo
 - BLE device scanning via NimBLE
 
 ### Gamification System
-- XP earned from: networks discovered, handshakes captured, channels scanned, uptime
-- 8 robot-themed levels (Unit → Omega)
+- XP earned from: networks discovered (+1), handshakes captured (+25), channels visited (+5), BLE devices (+2), uptime (+1/min)
+- **42 levels** with robot-themed titles:
+  - Levels 1-8: Unit → Omega
+  - Levels 9-16: Observer, Probe, Analyst, Decoder, Tracker, Hunter, Crawler, Synth
+  - Levels 17-24: Cortex, Nexus, Matrix, Quantum, Singularity, Hyperion, Archon, Titan
+  - Levels 25-32: Prime, Alpha, Omega Prime, Supreme, Transcendent, Paramount, Glorious, Eternal
+  - Levels 33-39: Legendary, Mythic, Omnipotent, Infinite, Absolute, Ultimate, Paramount
+  - **Level 40: Enigma** (hints at secrets)
+  - **Level 41: Marvin** (secret - requires prestige 1+)
+  - **Level 42: Deep Thought** (secret final level - requires prestige 2+)
+- Prestige system: Reset to level 1, keep prestige count, +10% XP bonus per prestige level
+- 37 achievements with XP rewards (hybrid system)
+- Daily challenges with streak tracking
 - Persistent XP storage via ESP32 NVS
 
 ### Modes
