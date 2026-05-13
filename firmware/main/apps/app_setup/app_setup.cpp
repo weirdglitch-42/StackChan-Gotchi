@@ -92,6 +92,11 @@ void AppSetup::onOpen()
                   _destroy_menu = true;
                   _worker       = std::make_unique<ZeroCalibrationWorker>();
               }},
+             {"Microphone",
+              [&]() {
+                  _destroy_menu = true;
+                  _worker       = std::make_unique<MicTestWorker>();
+              }},
              {"RGB Strip",
               [&]() {
                   _destroy_menu = true;
