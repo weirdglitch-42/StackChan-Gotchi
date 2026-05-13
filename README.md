@@ -1,7 +1,7 @@
 # StackChan-Gotchi
 
 <p align="center">
-  <img src="https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/K151_stack_chan_main_pictures_01.webp" width="60%">
+  <img src="https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/K151_stack_chan_main_pictures_01.webp" width="60%"> <img src="https://www.reddit.com/media?url=https%3A%2F%2Fi.redd.it%2F7nu4gnc2i60h1.jpeg" width="60%">
 </p>
 
 A **pwnagotchi-style WiFi/BLE reconnaissance companion** for M5Stack CoreS3 robot (StackChan). Combines Tamagotchi-like gamification with network scanning, uniquely leveraging StackChan's robot capabilities—expressive face, head movement, and neon lights.
